@@ -173,21 +173,6 @@ def extract_data_from_uploaded_file(uploaded_file):
     # To check for repeated concept ids equal to zero for the same analysis
     # Multiple concept ids equal to zero have the potential to create huge materialized views, which causes the service to be slow
 
-    important_analysis = [
-        401,
-        430,
-        601,
-        630,
-        701,
-        730,
-        801,
-        830,
-        1801,
-        1830,
-        2101,
-        2130,
-    ]
-
     repeated_counts = (
         {}
     )  # to store multiple concept_ids equal to zero for all chunks being processed
@@ -250,26 +235,33 @@ def extract_data_from_uploaded_file(uploaded_file):
         # Verify for multiple concept ids equal to 0 on the same analysis (Specifically for analysis ids of 401, 430, 601, 630, 701, 730, 801, 830, 1801, 1830, 2101, 2130)
 
         analysis_rows = chunk.loc[
-            (chunk["analysis_id"].isin(important_analysis))
-            & (chunk["stratum_1"] == "0")
-            & chunk[chunk.columns.symmetric_difference(["stratum_1"])]
-            .isnull()
-            .any(axis=1)
+            (chunk["stratum_1"] == "0")
+            & (
+                chunk[
+                    chunk.columns.symmetric_difference(
+                        ["analysis_id", "stratum_1", "count_value"]
+                    )
+                ]
+                .isnull()
+                .all(axis=1)
+            )
         ]
 
+        analysis = analysis_rows["analysis_id"].unique()
+
         if analysis_rows.empty == False:
-            for analysis in important_analysis:
+            for analysis_id in analysis:
                 duplicate_counts = analysis_rows.loc[
-                    (analysis_rows["analysis_id"] == analysis)
+                    (analysis_rows["analysis_id"] == analysis_id)
                 ].shape[0]
 
-                if analysis in repeated_counts:
-                    repeated_counts[analysis] += duplicate_counts
+                if analysis_id in repeated_counts:
+                    repeated_counts[analysis_id] += duplicate_counts
 
                 else:
-                    repeated_counts[analysis] = duplicate_counts
+                    repeated_counts[analysis_id] = duplicate_counts
 
-                if repeated_counts[analysis] >= 2:
+                if repeated_counts[analysis_id] >= 2:
                     raise MutipleConceptIdsEqualToZeroSameAnalysis(
                         f"Concept Id of 0 duplicated for the same analysis. Try (re)running the plugin "
                         "<a href='https://github.com/EHDEN/CatalogueExport'>CatalogueExport</a>"
