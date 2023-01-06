@@ -171,11 +171,10 @@ def extract_data_from_uploaded_file(uploaded_file):
     metadata = None
 
     # To check for repeated concept ids equal to zero for the same analysis
-    # Multiple concept ids equal to zero have the potential to create huge materialized views, which causes the service to be slow
 
     repeated_counts = (
         {}
-    )  # to store multiple concept_ids equal to zero for all chunks being processed
+    )  # to store the counts of the concept_ids equal to zero for all chunks of the file being processed
 
     while True:
         try:
@@ -232,7 +231,7 @@ def extract_data_from_uploaded_file(uploaded_file):
                 " on your database."
             )
 
-        # Verify for multiple concept ids equal to 0 on the same analysis (Specifically for analysis ids of 401, 430, 601, 630, 701, 730, 801, 830, 1801, 1830, 2101, 2130)
+        # Verify for multiple concept ids equal to 0 on the same analysis
 
         analysis_rows = chunk.loc[
             (chunk["stratum_1"] == "0")
@@ -261,7 +260,7 @@ def extract_data_from_uploaded_file(uploaded_file):
                 else:
                     repeated_counts[analysis_id] = duplicate_counts
 
-                if repeated_counts[analysis_id] >= 2:
+                if repeated_counts[analysis_id] > 1:
                     raise MutipleConceptIdsEqualToZeroSameAnalysis(
                         f"Concept Id of 0 duplicated for the same analysis. Try (re)running the plugin "
                         "<a href='https://github.com/EHDEN/CatalogueExport'>CatalogueExport</a>"
