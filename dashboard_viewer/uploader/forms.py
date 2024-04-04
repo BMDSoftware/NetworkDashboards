@@ -33,4 +33,7 @@ class EditSourceForm(SourceForm):
 
 
 class AchillesResultsForm(forms.Form):
-    results_file = forms.FileField()
+    results_file = forms.FileField(required=False, label='Catalogue Export File')
+
+class OnboardingReportForm(forms.Form):
+    onboarding_results_file = forms.FileField(required=False, label='Onboarding Report file (Optional)')
