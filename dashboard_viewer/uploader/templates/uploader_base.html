@@ -36,7 +36,7 @@
             {% block title %}{% endblock %}
 
             <form id="uploadForm" method="POST" enctype="multipart/form-data">
-                {% if onboarding_form %}
+                {% if constance_config.ALLOW_ONBOARDING_UPLOAD and onboarding_form %}
                     <div class="row">
                         <div class="col-6 col-sm-3">
                             {% bootstrap_form form %}

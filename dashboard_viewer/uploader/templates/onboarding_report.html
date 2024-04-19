@@ -37,6 +37,7 @@
         <div style="margin-top: 15px;text-align: center;">
             {% if body|length > 0 %}
                 <table class="table center table-stripped" style="font-size: 14px;margin-top: 20px;width: 95%;">
+                    <caption style="text-align:left"> {{ constance_config.CAPTION_ONBOARDING|markdownify  }}</caption>
                     <thead style="background-color: #023E8a;color: white">
                         <tr>
                             {% for header in headers %}
@@ -69,6 +70,7 @@
         margin-right: auto;
         border-collapse : collapse;  
     }
+    caption { caption-side:top; }
     table td, table th  
     {         
         max-width: 100px;

@@ -26,7 +26,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const tbody = tbodys[0];
 
         for (const tr of tbody.children) {
-            const status_td = tr.children[6];
+            const numberOfColumns = tr.children.length;
+            const status_td = tr.children[numberOfColumns-1];
+            
                
             if (status_td.dataset.failed === "yes") {
                 add_failure_message_popup(status_td, status_td.dataset.failureMsg);
@@ -37,10 +39,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         .then(r => r.json())
                         .then(r => {
                             if (r.status === "Done") {
-                                tr.children[2].innerText = r.data.r_package_version;
-                                tr.children[3].innerText = r.data.generation_date;
-                                tr.children[4].innerText = r.data.cdm_version;
-                                tr.children[5].innerText = r.data.vocabulary_version;
+                                tr.children[numberOfColumns - 5].innerText = r.data.r_package_version;
+                                tr.children[numberOfColumns - 4].innerText = r.data.generation_date;
+                                tr.children[numberOfColumns - 3].innerText = r.data.cdm_version;
+                                tr.children[numberOfColumns - 2].innerText = r.data.vocabulary_version;
 
                                 update_upload_status(status_td, "Done", "fas fa-check", "status-done");
 
