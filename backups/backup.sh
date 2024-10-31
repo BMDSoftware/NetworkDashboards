@@ -1,6 +1,8 @@
 #!/bin/sh
 
-STEP_COUNT=7
+STEP_COUNT=8
+MONTHS_PRIOR_TO_DELETE=3
+DAYS_PRIOR_TO_DELETE=$(( MONTHS_PRIOR_TO_DELETE * 30 ))
 
 echo_step() {
   printf "%3s/%s %s\n" "$1" "$STEP_COUNT" "$2"
@@ -15,7 +17,10 @@ if [ "$RUN" -eq 0 ] ; then
     exit 0
 fi
 
-echo_step "1" "Create temporary directory"
+echo_step "1" "Deleting backups prior to "$MONTHS_PRIOR_TO_DELETE" months"
+find "$TMP_DIRECTORY" -type f -name "dashboards_backups*" -mtime +$DAYS_PRIOR_TO_DELETE -delete
+
+echo_step "2" "Create temporary directory"
 BACKUP_DIRECTORY_NAME=dashboards_backups_$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 40)
 TMP_BACKUP_DIRECTORY=$TMP_DIRECTORY/$BACKUP_DIRECTORY_NAME
 
@@ -23,16 +28,16 @@ mkdir "$TMP_BACKUP_DIRECTORY"
 EXIT_STATUS=0
 
 (
-    echo_step "2" "Get into the docker directory"
+    echo_step "3" "Get into the docker directory"
     PREVIOUS_PWD=$(pwd)
     cd "$(dirname "$0")"
     (
         cd ../docker
 
-        echo_step "3" "Extract Dashboards's database"
+        echo_step "4" "Extract Dashboards's database"
         docker-compose exec -T postgres sh -c "pg_dumpall --clean -U \$POSTGRES_USER -l \$POSTGRES_USER" > $TMP_BACKUP_DIRECTORY/postgres.sql
 
-        echo_step "4" "Extract Redis's data"
+        echo_step "5" "Extract Redis's data"
         LAST_SAVE=$(docker-compose exec -T redis redis-cli -n $CONSTANCE_REDIS_DB LASTSAVE)
 
         # started redis backup
@@ -47,7 +52,7 @@ EXIT_STATUS=0
 
         docker cp -a $REDIS_CONTAINER_ID:/data/dump.rdb "$TMP_BACKUP_DIRECTORY/redis.rdb"
 
-        echo_step "5" "Extract Dashboards's media files"
+        echo_step "6" "Extract Dashboards's media files"
         MEDIA_ROOT=$(docker-compose exec -T dashboard sh -c """
 echo '''from django.conf import settings
 print(settings.MEDIA_ROOT, end=\"\")
@@ -65,14 +70,14 @@ print(settings.MEDIA_ROOT, end=\"\")
         DASHBOARDS_CONTAINER_ID=$(docker-compose ps -q dashboard)
         docker cp -a $DASHBOARDS_CONTAINER_ID:$MEDIA_ROOT "$TMP_BACKUP_DIRECTORY"
 
-        echo_step "6" "Compress gathered data"
+        echo_step "7" "Compress gathered data"
         COMPRESSED_FILE_PATH=$TMP_DIRECTORY/${APP_NAME}_$(date +"%Y%m%d%H%M%S").zip
         (
             cd "$TMP_DIRECTORY"
             zip -q -r "$COMPRESSED_FILE_PATH" $BACKUP_DIRECTORY_NAME
             #tar -C "$TMP_DIRECTORY" -cJf "$COMPRESSED_FILE_PATH" $BACKUP_DIRECTORY_NAME
 
-            echo_step "7" "Send to $SERVER"
+            echo_step "8" "Send to $SERVER"
             backup_uploader "$APP_NAME" "$SERVER" "$CREDENTIALS_FILE_PATH" "$BACKUP_CHAIN_CONFIG" "$COMPRESSED_FILE_PATH"
         ) || EXIT_STATUS=$?
         rm -f "$COMPRESSED_FILE_PATH"
