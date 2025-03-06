@@ -22,6 +22,9 @@ x-superset-environment: &superset-environment
   REDIS_RESULTS_DB: 3
   SECRET_KEY: $SUPERSET_SECRET_KEY
   SUPERSET_ENV: production
+  SERVER_WORKER_AMOUNT: 4
+  SERVER_THREADS_AMOUNT: 30
+  SUPERSET_WORKERS: 2
 
 x-dashboard-environment: &dashboard-environment
   POSTGRES_DEFAULT_HOST: postgres
@@ -107,6 +110,7 @@ services:
     volumes:
       - ${VOLUMES_PATH}/postgres:/var/lib/postgresql/data
       - ./postgres-entrypoint:/docker-entrypoint-initdb.d
+      - ./logs:/var/lib/postgresql/data/log
 
   #### DASHBOARD ####
   nginx:

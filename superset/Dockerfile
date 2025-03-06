@@ -110,7 +110,7 @@ WORKDIR /app
 
 USER superset
 
-HEALTHCHECK CMD curl -f "http://localhost:$SUPERSET_PORT/health"
+HEALTHCHECK --interval=60s CMD curl -f "http://localhost:$SUPERSET_PORT/health"
 
 EXPOSE ${SUPERSET_PORT}
 

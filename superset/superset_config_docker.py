@@ -10,7 +10,7 @@ FEATURE_FLAGS = {
     "FLATTEN_INDEX_ON_CSV_EXPORT": True
 }
 
-CHARTS_FOR_PIVOTED_CSV_EXPORT = []
+CHARTS_FOR_PIVOTED_CSV_EXPORT = ["concept_counts", "new_concept_browser", "nd_concept_counts", "atc_ingredient"]
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 
