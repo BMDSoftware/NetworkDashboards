@@ -5,7 +5,6 @@ x-depends-on: &depends-on
 x-superset-app-build: &superset-app-build
   context: ../superset
 x-superset-volumes: &superset-volumes
-  - ./superset/docker-init.sh:/app/docker/docker-init.sh
   - superset_home:/app/superset_home
 x-superset-environment: &superset-environment
   CYPRESS_CONFIG: "false"
@@ -24,9 +23,9 @@ x-superset-environment: &superset-environment
   REDIS_RESULTS_DB: 3
   SECRET_KEY: $SUPERSET_SECRET_KEY
   SUPERSET_ENV: production
-  SERVER_WORKER_AMOUNT: 1
-  SERVER_THREADS_AMOUNT: 20
-  SUPERSET_WORKERS: 1
+  SERVER_WORKER_AMOUNT: ${SERVER_WORKER_AMOUNT}
+  SERVER_THREADS_AMOUNT: ${SERVER_THREADS_AMOUNT}
+  SUPERSET_WORKERS: ${SUPERSET_WORKERS}
 
 x-dashboard-build: &dashboard-build
   context: ../dashboard_viewer
