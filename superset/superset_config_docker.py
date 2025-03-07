@@ -11,6 +11,8 @@ FEATURE_FLAGS = {
 }
 
 CHARTS_FOR_PIVOTED_CSV_EXPORT = []
+if os.environ.get("CHARTS_FOR_PIVOTED_CSV_EXPORT", None) is not None:
+    CHARTS_FOR_PIVOTED_CSV_EXPORT = os.environ["CHARTS_FOR_PIVOTED_CSV_EXPORT"].split(",")
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 

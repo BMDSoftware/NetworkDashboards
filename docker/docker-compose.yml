@@ -25,6 +25,7 @@ x-superset-environment: &superset-environment
   SERVER_WORKER_AMOUNT: ${SERVER_WORKER_AMOUNT}
   SERVER_THREADS_AMOUNT: ${SERVER_THREADS_AMOUNT}
   SUPERSET_WORKERS: ${SUPERSET_WORKERS}
+  CHARTS_FOR_PIVOTED_CSV_EXPORT: ${CHARTS_FOR_PIVOTED_CSV_EXPORT}
 
 x-dashboard-environment: &dashboard-environment
   POSTGRES_DEFAULT_HOST: postgres
