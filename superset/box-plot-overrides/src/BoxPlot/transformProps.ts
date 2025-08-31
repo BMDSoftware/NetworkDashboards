@@ -18,7 +18,6 @@
  */
 import {
   CategoricalColorNamespace,
-  DataRecordValue,
   getColumnLabel,
   DataRecord,
   getMetricLabel,
@@ -38,14 +37,16 @@ import {
   getColtypesMapping,
   sanitizeHtml,
 } from '../utils/series';
-import { defaultGrid, defaultTooltip, defaultYAxis } from '../defaults';
+import { getDefaultTooltip } from '../utils/tooltip';
+import { defaultGrid, defaultYAxis } from '../defaults';
 import { getPadding } from '../Timeseries/transformers';
 import { OpacityEnum } from '../constants';
+import { Refs } from '../types';
 
 export default function transformProps(
   chartProps: EchartsBoxPlotChartProps,
 ): BoxPlotChartTransformedProps {
-  const { width, height, formData, hooks, filterState, queriesData } =
+  const { width, height, formData, hooks, filterState, queriesData, emitCrossFilters } =
     chartProps;
   const { data: original_data = [] } = queriesData[0];
   const { setDataMask = () => {} } = hooks;
@@ -58,7 +59,6 @@ export default function transformProps(
     numberFormat,
     dateFormat,
     xTicksLayout,
-    emitFilter,
     legendOrientation = 'top',
     xAxisTitle,
     yAxisTitle,
@@ -69,7 +69,7 @@ export default function transformProps(
   const colorFn = CategoricalColorNamespace.getScale(colorScheme as string);
   const numberFormatter = getNumberFormatter(numberFormat);
   const groupbyLabels = groupby.map(getColumnLabel);
-
+  const refs: Refs = {};
   let transformedData: {
     name: string;
     value: any[];
@@ -188,7 +188,7 @@ export default function transformProps(
           coltypeMapping,
           timeFormatter: getTimeFormatter(dateFormat),
         });
-        return metricLabels.map(metric => {
+        return metricLabels.map((metric: any) => {
           const name =
             metricLabels.length === 1
               ? groupbyLabel
@@ -220,7 +220,7 @@ export default function transformProps(
 
     outlierData = original_data
       .map(datum =>
-        metricLabels.map(metric => {
+        metricLabels.map((metric: any) => {
           const groupbyLabel = extractGroupbyLabel({
             datum,
             groupby: groupbyLabels,
@@ -261,21 +261,18 @@ export default function transformProps(
       .flat(2);
   }
 
-  const labelMap = original_data.reduce(
-    (acc: Record<string, DataRecordValue[]>, datum) => {
-      const label = extractGroupbyLabel({
-        datum,
-        groupby: groupbyLabels,
-        coltypeMapping,
-        timeFormatter: getTimeFormatter(dateFormat),
-      });
-      return {
-        ...acc,
-        [label]: groupbyLabels.map(col => datum[col]),
-      };
-    },
-    {},
-  );
+  const labelMap = original_data.reduce((acc: Record<string, string[]>, datum) => {
+    const label = extractGroupbyLabel({
+      datum,
+      groupby: groupbyLabels,
+      coltypeMapping,
+      timeFormatter: getTimeFormatter(dateFormat),
+    });
+    return {
+      ...acc,
+      [label]: groupbyLabels.map(col => datum[col] as string),
+    };
+  }, {});
 
   const selectedValues = (filterState.selectedValues || []).reduce(
     (acc: Record<string, number>, selectedValue: string) => {
@@ -395,7 +392,7 @@ export default function transformProps(
       nameLocation: yAxisTitlePosition === 'Left' ? 'middle' : 'end',
     },
     tooltip: {
-      ...defaultTooltip,
+      ...getDefaultTooltip(refs),
       trigger: 'item',
       axisPointer: {
         type: 'shadow',
@@ -409,10 +406,11 @@ export default function transformProps(
     width,
     height,
     echartOptions,
+    emitCrossFilters,
     setDataMask,
-    emitFilter,
     labelMap,
     groupby,
     selectedValues,
+    refs,
   };
 }

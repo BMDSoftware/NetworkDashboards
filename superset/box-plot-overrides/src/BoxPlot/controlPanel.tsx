@@ -34,7 +34,6 @@ import {
   D3_TIME_FORMAT_OPTIONS,
   formatSelectOptions,
   sections,
-  emitFilterControl,
   sharedControls,
   QueryModeLabel,
   ControlPanelConfig,
@@ -206,7 +205,6 @@ const config: ControlPanelConfig = {
         ],
         ['metrics'],
         ['adhoc_filters'],
-        emitFilterControl,
         ['groupby'],
         ['columns'], // TODO: this should be migrated to `series_columns`
         ['series_limit'],
