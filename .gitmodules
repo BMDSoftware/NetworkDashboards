@@ -1,4 +1,4 @@
 [submodule "superset"]
 	path = superset/repo
 	url = https://github.com/BMDSoftware/superset
-    branch = test/releases_4.0.0
+    branch = test/release_4.1.0

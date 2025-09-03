@@ -55,7 +55,7 @@ version: "3.7"
 services:
   #### SUPERSET ####
   superset:
-    image: bmdsoftware/superset:4.0.0-rc
+    image: bmdsoftware/superset:4.1.0-rc
     build: *superset-app-build
     command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
     restart: unless-stopped
@@ -67,7 +67,7 @@ services:
       - ${SUPERSET_PORT}:8088
 
   superset-init:
-    image: bmdsoftware/superset:4.0.0-rc
+    image: bmdsoftware/superset:4.1.0-rc
     build: *superset-app-build
     command: ["/app/docker/docker-init.sh"]
     environment: *superset-environment
@@ -76,7 +76,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker:
-    image: bmdsoftware/superset:4.0.0-rc
+    image: bmdsoftware/superset:4.1.0-rc
     build: *superset-app-build
     command: ["/app/docker/docker-bootstrap.sh", "worker"]
     restart: unless-stopped
@@ -86,7 +86,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker-beat:
-    image: bmdsoftware/superset:4.0.0-rc
+    image: bmdsoftware/superset:4.1.0-rc
     build: *superset-app-build
     command: ["/app/docker/docker-bootstrap.sh", "beat"]
     restart: unless-stopped
@@ -120,7 +120,7 @@ services:
       - ./postgres-entrypoint:/docker-entrypoint-initdb.d
       - ./logs:/var/lib/postgresql/data/log
   dashboard_worker:
-    image: bmdsoftware/dashboard:4.0.0-rc
+    image: bmdsoftware/dashboard:4.1.0-rc
     build: *dashboard-build
     environment: *dashboard-environment
     command: /app/docker-entrypoint-worker.sh
@@ -131,7 +131,7 @@ services:
       - ../dashboard_viewer:/app
 
   dashboard:
-    image: bmdsoftware/dashboard:4.0.0-rc
+    image: bmdsoftware/dashboard:4.1.0-rc
     build: *dashboard-build
     environment: *dashboard-environment
     ports:

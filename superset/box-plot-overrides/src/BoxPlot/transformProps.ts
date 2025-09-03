@@ -79,7 +79,6 @@ export default function transformProps(
   const refs: Refs = {};
   const colorFn = CategoricalColorNamespace.getScale(colorScheme as string);
   const numberFormatter = getNumberFormatter(numberFormat);
-  const metricLabels = metrics.map(getMetricLabel);
   const groupbyLabels = groupby.map(getColumnLabel);
 
   let transformedData: {
@@ -405,6 +404,7 @@ export default function transformProps(
     },
     tooltip: {
       ...getDefaultTooltip(refs),
+      show: !inContextMenu,
       trigger: 'item',
       axisPointer: {
         type: 'shadow',
