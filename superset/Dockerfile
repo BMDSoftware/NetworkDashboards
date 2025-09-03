@@ -18,31 +18,58 @@
 ######################################################################
 # Node stage to deal with static asset construction
 ######################################################################
-ARG PY_VER=3.10-slim-bookworm
+ARG PY_VER=3.11.13-slim-bookworm
 
 # if BUILDPLATFORM is null, set it to 'amd64' (or leave as is otherwise).
 ARG BUILDPLATFORM=${BUILDPLATFORM:-amd64}
-FROM --platform=${BUILDPLATFORM} node:18-bullseye-slim AS superset-node
 
+# Include translations in the final build
+ARG BUILD_TRANSLATIONS="false"
+
+######################################################################
+# superset-node-ci used as a base for building frontend assets and CI
+######################################################################
+FROM --platform=${BUILDPLATFORM} node:20-bookworm-slim AS superset-node
+ARG BUILD_TRANSLATIONS
+ENV BUILD_TRANSLATIONS=${BUILD_TRANSLATIONS}
+ARG DEV_MODE="false"           # Skip frontend build in dev mode
+ENV DEV_MODE=${DEV_MODE}
+
+COPY ./repo/docker/ /app/docker/
+# Arguments for build configuration
 ARG NPM_BUILD_CMD="build"
 
-RUN apt-get update -qq \
-    && apt-get install -yqq --no-install-recommends \
-        build-essential \
-        python3
+# Install system dependencies required for node-gyp
+RUN /app/docker/apt-install.sh build-essential python3 zstd
 
+# Define environment variables for frontend build
 ENV BUILD_CMD=${NPM_BUILD_CMD} \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
-RUN --mount=type=bind,target=/frontend-mem-nag.sh,src=./repo/docker/frontend-mem-nag.sh \
-    /frontend-mem-nag.sh
+# Run the frontend memory monitoring script
+RUN /app/docker/frontend-mem-nag.sh
 
 # NPM ci first, as to NOT invalidate previous steps except for when package.json changes
 WORKDIR /app/superset-frontend
 
-RUN --mount=type=bind,target=./package.json,src=./repo/superset-frontend/package.json \
-    --mount=type=bind,target=./package-lock.json,src=./repo/superset-frontend/package-lock.json \
-    npm ci
+# Create necessary folders to avoid errors in subsequent steps
+RUN mkdir -p /app/superset/static/assets \
+             /app/superset/translations
+
+# Mount package files and install dependencies if not in dev mode
+# NOTE: we mount packages and plugins as they are referenced in package.json as workspaces
+# ideally we'd COPY only their package.json. Here npm ci will be cached as long
+# as the full content of these folders don't change, yielding a decent cache reuse rate.
+# Note that's it's not possible selectively COPY of mount using blobs.
+RUN --mount=type=bind,source=./repo/superset-frontend/package.json,target=./package.json \
+    --mount=type=bind,source=./repo/superset-frontend/package-lock.json,target=./package-lock.json \
+    --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/root/.npm \
+    if [ "$DEV_MODE" = "false" ]; then \
+        npm ci; \
+    else \
+        echo "Skipping 'npm ci' in dev mode"; \
+    fi
 
 COPY ./repo/superset-frontend /app/superset-frontend
 
@@ -50,90 +77,161 @@ COPY ./repo/superset-frontend /app/superset-frontend
 COPY ./box-plot-overrides ./plugins/plugin-chart-echarts/
 RUN rm -f ./plugins/plugin-chart-echarts/src/BoxPlot/controlPanel.ts
 
-# This seems to be the most expensive step
-RUN npm run ${BUILD_CMD}
+# Build the frontend if not in dev mode
+RUN --mount=type=cache,target=/root/.npm \
+    if [ "$DEV_MODE" = "false" ]; then \
+        echo "Running 'npm run ${BUILD_CMD}'"; \
+        npm run ${BUILD_CMD}; \
+    else \
+        echo "Skipping 'npm run ${BUILD_CMD}' in dev mode"; \
+    fi;
 
-# This copies the .po files needed for translation
-RUN mkdir -p /app/superset/translations
+# Copy translation files
 COPY ./repo/superset/translations /app/superset/translations
-# Compiles .json files from the .po files, then deletes the .po files
-RUN npm run build-translation
-RUN rm /app/superset/translations/*/LC_MESSAGES/*.po
-RUN rm /app/superset/translations/messages.pot
+
+# Build the frontend if not in dev mode
+RUN if [ "$BUILD_TRANSLATIONS" = "true" ]; then \
+        npm run build-translation; \
+    fi; \
+    rm -rf /app/superset/translations/*/*/*.po; \
+    rm -rf /app/superset/translations/*/*/*.mo;
+
 
 ######################################################################
-# Final lean image...
+# Base python layer
 ######################################################################
-FROM python:${PY_VER} AS lean
+FROM python:${PY_VER} AS python-base
 
-WORKDIR /app
-ENV LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    SUPERSET_ENV=production \
+ARG SUPERSET_HOME="/app/superset_home"
+ENV SUPERSET_HOME=${SUPERSET_HOME}
+
+RUN mkdir -p $SUPERSET_HOME
+RUN useradd --user-group -d ${SUPERSET_HOME} -m --no-log-init --shell /bin/bash superset \
+    && chmod -R 1777 $SUPERSET_HOME \
+    && chown -R superset:superset $SUPERSET_HOME
+
+# Some bash scripts needed throughout the layers
+COPY --chmod=755 ./repo/docker/*.sh /app/docker/
+
+RUN pip install --no-cache-dir --upgrade uv
+
+# Using uv as it's faster/simpler than pip
+RUN uv venv /app/.venv
+ENV PATH="/app/.venv/bin:${PATH}"
+
+
+######################################################################
+# Python translation compiler layer
+######################################################################
+FROM python-base AS python-translation-compiler
+
+ARG BUILD_TRANSLATIONS
+ENV BUILD_TRANSLATIONS=${BUILD_TRANSLATIONS}
+
+# Install Python dependencies using docker/pip-install.sh
+COPY ./repo/requirements/translations.txt requirements/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    . /app/.venv/bin/activate && /app/docker/pip-install.sh --requires-build-essential -r requirements/translations.txt
+
+COPY ./repo/superset/translations/ /app/translations_mo/
+RUN if [ "$BUILD_TRANSLATIONS" = "true" ]; then \
+        pybabel compile -d /app/translations_mo | true; \
+    fi; \
+    rm -f /app/translations_mo/*/*/*.po; \
+    rm -f /app/translations_mo/*/*/*.json;
+
+
+######################################################################
+# Python APP common layer
+######################################################################
+FROM python-base AS python-common
+
+ENV SUPERSET_HOME="/app/superset_home" \
+    HOME="/app/superset_home" \
+    SUPERSET_ENV="production" \
     FLASK_APP="superset.app:create_app()" \
     PYTHONPATH="/app/pythonpath" \
-    SUPERSET_HOME="/app/superset_home" \
-    SUPERSET_PORT=8088
+    SUPERSET_PORT="8088"
 
-RUN mkdir -p ${PYTHONPATH} superset/static superset-frontend apache_superset.egg-info requirements \
-    && useradd --user-group -d ${SUPERSET_HOME} -m --no-log-init --shell /bin/bash superset \
-    && apt-get update -qq && apt-get install -yqq --no-install-recommends \
-        build-essential \
-        curl \
-        default-libmysqlclient-dev \
-        libsasl2-dev \
-        libsasl2-modules-gssapi-mit \
-        libpq-dev \
-        libecpg-dev \
-        libldap2-dev \
-    && touch superset/static/version_info.json \
-    && chown -R superset:superset ./* \
-    && rm -rf /var/lib/apt/lists/*
+# Copy the entrypoints, make them executable in userspace
+COPY --chmod=755 ./repo/docker/entrypoints /app/docker/entrypoints
+
+WORKDIR /app
+# Set up necessary directories and user
+RUN mkdir -p \
+      ${PYTHONPATH} \
+      superset/static \
+      requirements \
+      superset-frontend \
+      apache_superset.egg-info \
+      requirements \
+    && touch superset/static/version_info.json
+
+# Install Playwright and optionally setup headless browsers
+ARG INCLUDE_CHROMIUM="true"
+ARG INCLUDE_FIREFOX="false"
+RUN --mount=type=cache,target=${SUPERSET_HOME}/.cache/uv \
+    if [ "$INCLUDE_CHROMIUM" = "true" ] || [ "$INCLUDE_FIREFOX" = "true" ]; then \
+        uv pip install playwright && \
+        playwright install-deps && \
+        if [ "$INCLUDE_CHROMIUM" = "true" ]; then playwright install chromium; fi && \
+        if [ "$INCLUDE_FIREFOX" = "true" ]; then playwright install firefox; fi; \
+    else \
+        echo "Skipping browser installation"; \
+    fi
 
 # Copying configs. No need for a volume
 COPY ./repo/docker/pythonpath_dev/superset_config.py ./superset_config_docker.py ./pythonpath_docker/
 
-COPY --chown=superset:superset ./repo/pyproject.toml ./repo/setup.py ./repo/MANIFEST.in ./repo/README.md ./
-# setup.py uses the version information in package.json
-COPY --chown=superset:superset ./repo/superset-frontend/package.json superset-frontend/
-COPY --chown=superset:superset ./repo/requirements/base.txt requirements/
-RUN --mount=type=cache,target=/root/.cache/pip \
-    apt-get update -qq && apt-get install -yqq --no-install-recommends \
-      build-essential \
-    && pip install --upgrade setuptools pip \
-    && pip install -r requirements/base.txt \
-    && pip install psycopg2-binary \
-    && apt-get autoremove -yqq --purge build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Copy required files for Python build
+COPY ./repo/pyproject.toml ./repo/setup.py ./repo/MANIFEST.in ./repo/README.md ./
+COPY ./repo/superset-frontend/package.json superset-frontend/
+COPY ./repo/scripts/check-env.py scripts/
 
-# Copy the compiled frontend assets
-COPY --chown=superset:superset --from=superset-node /app/superset/static/assets superset/static/assets
+# keeping for backward compatibility
+COPY --chmod=755 ./repo/docker/entrypoints/run-server.sh /usr/bin/
 
-## Lastly, let's install superset itself
-COPY --chown=superset:superset ./repo/superset superset
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e .
+# Some debian libs
+RUN /app/docker/apt-install.sh \
+      curl \
+      libsasl2-dev \
+      libsasl2-modules-gssapi-mit \
+      libpq-dev \
+      libecpg-dev \
+      libldap2-dev
 
-# Copy the .json translations from the frontend layer
-COPY --chown=superset:superset --from=superset-node /app/superset/translations superset/translations
+# Copy compiled things from previous stages
+COPY --from=superset-node /app/superset/static/assets superset/static/assets
 
-# Compile translations for the backend - this generates .mo files, then deletes the .po files
-COPY ./repo/scripts/translations/generate_mo_files.sh ./scripts/translations/
-RUN ./scripts/translations/generate_mo_files.sh \
-    && chown -R superset:superset superset/translations \
-    && rm superset/translations/messages.pot \
-    && rm superset/translations/*/LC_MESSAGES/*.po
+# TODO, when the next version comes out, use --exclude superset/translations
+COPY ./repo/superset superset
+# TODO in the meantime, remove the .po files
+RUN rm superset/translations/*/*/*.po
 
-COPY --chmod=755 ./repo/docker/run-server.sh /usr/bin/
+# Merging translations from backend and frontend stages
+COPY --from=superset-node /app/superset/translations superset/translations
+COPY --from=python-translation-compiler /app/translations_mo superset/translations
 
 # copy scripts to start containers to avoid volumes
 COPY --chmod=755 ./repo/docker/docker-bootstrap.sh ./repo/docker/docker-init.sh ./docker/
 
-USER superset
-HEALTHCHECK CMD curl -f "http://localhost:$SUPERSET_PORT/health"
-
+HEALTHCHECK CMD curl -f "http://localhost:${SUPERSET_PORT}/health"
+CMD ["/app/docker/entrypoints/run-server.sh"]
 EXPOSE ${SUPERSET_PORT}
 
-CMD ["/usr/bin/run-server.sh"]
 
+######################################################################
+# Final lean image...
+######################################################################
+FROM python-common AS lean
 
+# Install Python dependencies using docker/pip-install.sh
+COPY ./repo/requirements/base.txt requirements/
+RUN --mount=type=cache,target=${SUPERSET_HOME}/.cache/uv \
+    /app/docker/pip-install.sh --requires-build-essential -r requirements/base.txt
+# Install the superset package
+RUN --mount=type=cache,target=${SUPERSET_HOME}/.cache/uv \
+    uv pip install .
+RUN python -m compileall /app/superset
+
+USER superset
