@@ -37,19 +37,28 @@ import {
   getColtypesMapping,
   sanitizeHtml,
 } from '../utils/series';
-import { getDefaultTooltip } from '../utils/tooltip';
+import { convertInteger } from '../utils/convertInteger';
 import { defaultGrid, defaultYAxis } from '../defaults';
 import { getPadding } from '../Timeseries/transformers';
 import { OpacityEnum } from '../constants';
+import { getDefaultTooltip } from '../utils/tooltip';
 import { Refs } from '../types';
 
 export default function transformProps(
   chartProps: EchartsBoxPlotChartProps,
 ): BoxPlotChartTransformedProps {
-  const { width, height, formData, hooks, filterState, queriesData, emitCrossFilters } =
-    chartProps;
+  const {
+    width,
+    height,
+    formData,
+    hooks,
+    filterState,
+    queriesData,
+    inContextMenu,
+    emitCrossFilters,
+  } = chartProps;
   const { data: original_data = [] } = queriesData[0];
-  const { setDataMask = () => {} } = hooks;
+  const { setDataMask = () => {}, onContextMenu} = hooks;
   const coltypeMapping = getColtypesMapping(queriesData[0]);
   const {
     colorScheme,
@@ -65,11 +74,14 @@ export default function transformProps(
     xAxisTitleMargin,
     yAxisTitleMargin,
     yAxisTitlePosition,
+    sliceId
   } = formData as BoxPlotQueryFormData;
+  const refs: Refs = {};
   const colorFn = CategoricalColorNamespace.getScale(colorScheme as string);
   const numberFormatter = getNumberFormatter(numberFormat);
+  const metricLabels = metrics.map(getMetricLabel);
   const groupbyLabels = groupby.map(getColumnLabel);
-  const refs: Refs = {};
+
   let transformedData: {
     name: string;
     value: any[];
@@ -81,7 +93,7 @@ export default function transformProps(
   }[];
   let outlierData;
 
-  if (queryMode === QueryMode.raw) {
+  if (queryMode === QueryMode.Raw) {
     const data = Object.fromEntries(
       queriesData[0].data.map(row => {
         const key = extractGroupbyLabel({
@@ -134,7 +146,7 @@ export default function transformProps(
               },
             },
             itemStyle: {
-              color: colorFn(groupbyLabel),
+              color: colorFn(groupbyLabel, sliceId),
               opacity: isFiltered
                 ? OpacityEnum.SemiTransparent
                 : OpacityEnum.NonTransparent,
@@ -170,7 +182,7 @@ export default function transformProps(
               : [],
           ],
           itemStyle: {
-            color: colorFn(groupByLabel),
+            color: colorFn(groupByLabel, sliceId),
             opacity: isFiltered ? OpacityEnum.SemiTransparent : 0.6,
             borderColor: colorFn(groupByLabel),
           },
@@ -209,7 +221,7 @@ export default function transformProps(
               datum[`${metric}__outliers`],
             ],
             itemStyle: {
-              color: colorFn(groupbyLabel),
+              color: colorFn(groupbyLabel, sliceId),
               opacity: isFiltered ? OpacityEnum.SemiTransparent : 0.6,
               borderColor: colorFn(groupbyLabel),
             },
@@ -217,10 +229,9 @@ export default function transformProps(
         });
       })
       .flatMap(row => row);
-
     outlierData = original_data
       .map(datum =>
-        metricLabels.map((metric: any) => {
+        metricLabels.map(metric => {
           const groupbyLabel = extractGroupbyLabel({
             datum,
             groupby: groupbyLabels,
@@ -241,6 +252,7 @@ export default function transformProps(
             type: 'scatter',
             data: outlierDatum.map(val => [name, val]),
             tooltip: {
+              ...getDefaultTooltip(refs),
               formatter: (param: { data: [string, number] }) => {
                 const [outlierName, stats] = param.data;
                 const headline = groupbyLabels.length
@@ -250,7 +262,7 @@ export default function transformProps(
               },
             },
             itemStyle: {
-              color: colorFn(groupbyLabel),
+              color: colorFn(groupbyLabel, sliceId),
               opacity: isFiltered
                 ? OpacityEnum.SemiTransparent
                 : OpacityEnum.NonTransparent,
@@ -325,7 +337,7 @@ export default function transformProps(
             ? `<p><strong>${sanitizeHtml(name)}</strong></p>`
             : '';
           let stats;
-          if (queryMode === QueryMode.raw) {
+          if (queryMode === QueryMode.Raw) {
             stats = [
               `Max: ${numberFormatter(value[7])}`,
               `90th Percentile: ${numberFormatter(value[5])}`,
@@ -366,8 +378,8 @@ export default function transformProps(
     null,
     addXAxisTitleOffset,
     yAxisTitlePosition,
-    yAxisTitleMargin,
-    xAxisTitleMargin,
+    convertInteger(yAxisTitleMargin),
+    convertInteger(xAxisTitleMargin),
   );
 
   const echartOptions: EChartsCoreOption = {
@@ -380,7 +392,7 @@ export default function transformProps(
       data: transformedData.map(row => row.name),
       axisLabel,
       name: xAxisTitle,
-      nameGap: xAxisTitleMargin,
+      nameGap: convertInteger(xAxisTitleMargin),
       nameLocation: 'middle',
     },
     yAxis: {
@@ -388,7 +400,7 @@ export default function transformProps(
       type: 'value',
       axisLabel: { formatter: numberFormatter },
       name: yAxisTitle,
-      nameGap: yAxisTitleMargin,
+      nameGap: convertInteger(yAxisTitleMargin),
       nameLocation: yAxisTitlePosition === 'Left' ? 'middle' : 'end',
     },
     tooltip: {
@@ -406,11 +418,13 @@ export default function transformProps(
     width,
     height,
     echartOptions,
-    emitCrossFilters,
     setDataMask,
+    emitCrossFilters,
     labelMap,
     groupby,
     selectedValues,
+    onContextMenu,
     refs,
+    coltypeMapping,
   };
 }

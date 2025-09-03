@@ -17,7 +17,6 @@
  * under the License.
  */
 import { QueryFormData } from '@superset-ui/core';
-import { DEFAULT_TITLE_FORM_DATA } from '../constants';
 import {
   BaseChartProps,
   BaseTransformedProps,
@@ -25,14 +24,13 @@ import {
   CrossFilterTransformedProps,
   TitleFormData,
 } from '../types';
+import { DEFAULT_TITLE_FORM_DATA } from '../constants';
 
 export type BoxPlotQueryFormData = QueryFormData & {
   numberFormat?: string;
   whiskerOptions?: BoxPlotFormDataWhiskerOptions;
   xTickLayout?: BoxPlotFormXTickLayout;
 } & TitleFormData;
-
-export type BoxPlotFormDataQueryMode = 'aggregate' | 'raw';
 
 export type BoxPlotFormDataWhiskerOptions =
   | 'Tukey'
@@ -49,8 +47,6 @@ export type BoxPlotFormXTickLayout =
 
 // @ts-ignore
 export const DEFAULT_FORM_DATA: BoxPlotQueryFormData = {
-  emitFilter: false,
-  query_mode: 'aggregate',
   ...DEFAULT_TITLE_FORM_DATA,
 };
 
