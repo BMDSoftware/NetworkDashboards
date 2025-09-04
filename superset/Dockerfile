@@ -228,7 +228,8 @@ FROM python-common AS lean
 # Install Python dependencies using docker/pip-install.sh
 COPY ./repo/requirements/base.txt requirements/
 RUN --mount=type=cache,target=${SUPERSET_HOME}/.cache/uv \
-    /app/docker/pip-install.sh --requires-build-essential -r requirements/base.txt
+    /app/docker/pip-install.sh --requires-build-essential -r requirements/base.txt \
+    && pip install psycopg2-binary 
 # Install the superset package
 RUN --mount=type=cache,target=${SUPERSET_HOME}/.cache/uv \
     uv pip install .
