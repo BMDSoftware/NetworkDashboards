@@ -323,9 +323,9 @@ CONSTANCE_CONFIG = {
         str,
     ),
     "DATABASE_FILTER_ID": (
-        69,
+        "69",
         "Id of the database filter present in the Database Dashboard",
-        int,
+        str,
     ),
     "TABS_LOGO_CONTAINER_CSS": (
         "padding: 5px 5px 5px 5px;\nheight: 100px;\nmargin-bottom: 10px;\n",

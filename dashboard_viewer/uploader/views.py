@@ -19,6 +19,8 @@ from .forms import AchillesResultsForm, EditSourceForm, SourceForm, OnboardingRe
 from .models import Country, DataSource, PendingUpload, UploadHistory, OnboardingReport
 from .tasks import upload_results_file
 import pandas as pd
+import urllib
+
 PAGE_TITLE = "Dashboard Data Upload"
 ONBOARDING_TITLE = "Onboarding Page"
 
@@ -315,13 +317,31 @@ def data_source_dashboard(request, data_source):
 
     if data_source.uploadhistory_set.exists():
         config = constance.config
-        resp = str(
-            f"{config.SUPERSET_HOST}/superset/dashboard/{config.DATABASE_DASHBOARD_IDENTIFIER}/"
-            "?standalone=1"
-            f'&preselect_filters={{"{config.DATABASE_FILTER_ID}":{{"acronym":["{data_source.acronym}"]}}}}'
+        
+        filter_id = config.DATABASE_FILTER_ID
+        dashboard_id = config.DATABASE_DASHBOARD_IDENTIFIER
+        acronym = data_source.acronym
+
+        # Construct the native_filters object in rison format
+        rison_str = str(
+            f"({filter_id}:("
+            f"__cache:(label:'{acronym}',validateStatus:!f,value:!('{acronym}')),"
+            f"extraFormData:(filters:!((col:acronym,op:IN,val:!('{acronym}')))),"
+            f"filterState:(label:'{acronym}',validateStatus:!f,value:!('{acronym}')),"
+            f"id:{filter_id},ownState:())"
+            f")"
         )
 
-        return JsonResponse({"link": resp})
+        # URL encode, keeping Rison-specific characters safe
+        encoded_filters = urllib.parse.quote(rison_str, safe="()!':,")
+
+        # Construct final URL
+        url = (
+            f"{config.SUPERSET_HOST}/superset/dashboard/{dashboard_id}/"
+            f"?standalone=1&native_filters={encoded_filters}"
+        )
+
+        return JsonResponse({"link": url})
 
     # This way if there is at least one successfull upload it will redirect to the dashboards
     # We could only check if the last upload for the data source was sucessfull
