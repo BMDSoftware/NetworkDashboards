@@ -26,6 +26,18 @@ x-superset-environment: &superset-environment
   SERVER_THREADS_AMOUNT: ${SERVER_THREADS_AMOUNT}
   SUPERSET_WORKERS: ${SUPERSET_WORKERS}
   CHARTS_FOR_PIVOTED_CSV_EXPORT: ${CHARTS_FOR_PIVOTED_CSV_EXPORT}
+  FEATURE_EMBEDDED_SUPERSET: ${FEATURE_EMBEDDED_SUPERSET}
+  GUEST_ROLE_NAME: ${GUEST_ROLE_NAME}
+  GUEST_TOKEN_JWT_SECRET: ${GUEST_TOKEN_JWT_SECRET}
+  GUEST_TOKEN_JWT_AUDIENCE: ${GUEST_TOKEN_JWT_AUDIENCE}
+  GUEST_TOKEN_JWT_EXP_SECONDS: ${GUEST_TOKEN_JWT_EXP_SECONDS}
+  TALISMAN_ENABLED: "True"
+  ENABLE_CORS: ${ENABLE_CORS}
+  CORS_ORIGINS: ${CORS_ORIGINS}
+  CSP_FRAME_ANCESTORS: ${CSP_FRAME_ANCESTORS}
+  TALISMAN_FORCE_HTTPS: "True"
+  TALISMAN_SESSION_COOKIE_SECURE: "True"
+  WTF_CSRF_HEADERS: ${WTF_CSRF_HEADERS}
 
 x-dashboard-environment: &dashboard-environment
   POSTGRES_DEFAULT_HOST: postgres
@@ -54,7 +66,7 @@ version: "3.7"
 services:
   #### SUPERSET ####
   superset:
-    image: bmdsoftware/networkdashboards_superset
+    image: bmdsoftware/superset:5.0.0
     command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
     restart: unless-stopped
     environment: *superset-environment
@@ -65,7 +77,7 @@ services:
       - ${SUPERSET_PORT}:8088
 
   superset-init:
-    image: bmdsoftware/networkdashboards_superset
+    image: bmdsoftware/superset:5.0.0
     command: ["/app/docker/docker-init.sh"]
     environment: *superset-environment
     user: "root"
@@ -73,7 +85,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker:
-    image: bmdsoftware/networkdashboards_superset
+    image: bmdsoftware/superset:5.0.0
     command: ["/app/docker/docker-bootstrap.sh", "worker"]
     restart: unless-stopped
     environment: *superset-environment
@@ -82,7 +94,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker-beat:
-    image: bmdsoftware/networkdashboards_superset
+    image: bmdsoftware/superset:5.0.0
     command: ["/app/docker/docker-bootstrap.sh", "beat"]
     restart: unless-stopped
     environment: *superset-environment

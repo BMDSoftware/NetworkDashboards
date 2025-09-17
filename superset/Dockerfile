@@ -232,7 +232,7 @@ RUN --mount=type=cache,target=${SUPERSET_HOME}/.cache/uv \
     && pip install psycopg2-binary 
 # Install the superset package
 RUN --mount=type=cache,target=${SUPERSET_HOME}/.cache/uv \
-    uv pip install .
+    uv pip install . && uv pip install flask-cors
 RUN python -m compileall /app/superset
 
 USER superset
