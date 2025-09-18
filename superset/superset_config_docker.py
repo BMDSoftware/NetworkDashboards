@@ -35,7 +35,7 @@ TALISMAN_CONFIG = {
 }
 
 # CSRF headers
-WTF_CSRF_HEADERS = [os.environ.get("WTF_CSRF_HEADERS", "X-CSRFToken")]
+WTF_CSRF_HEADERS = os.environ.get("WTF_CSRF_HEADERS", "X-CSRFToken").split(",")
 
 CHARTS_FOR_PIVOTED_CSV_EXPORT = []
 if os.environ.get("CHARTS_FOR_PIVOTED_CSV_EXPORT", None) is not None:
