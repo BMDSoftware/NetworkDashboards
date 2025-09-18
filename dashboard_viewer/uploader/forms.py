@@ -4,10 +4,16 @@ from django import forms
 
 from .fields import CoordinatesField
 from .models import DatabaseType, DataSource
-from .widgets import ListTextWidget
-
+from django.core.exceptions import ValidationError
 
 class SourceForm(forms.ModelForm):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["database_type"].widget = forms.Select(
+            choices=[(obj.id, obj.type) for obj in DatabaseType.objects.all()]
+        )
+
     coordinates = CoordinatesField(
         help_text="Coordinates for the location of the data source"
     )
@@ -16,13 +22,15 @@ class SourceForm(forms.ModelForm):
         model = DataSource
         fields = ("name", "acronym", "country", "link", "database_type", "hash")
         widgets = {
-            "database_type": ListTextWidget(DatabaseType.objects),
             "release_date": DatePickerInput(),  # format %m/%d/%Y. Using a ModelForm this can't be changed
             "hash": forms.HiddenInput(),
         }
 
     def clean_database_type(self):
-        return self.cleaned_data["database_type"].strip().title()
+        value = self.cleaned_data["database_type"].strip().title()
+        if not DatabaseType.objects.filter(type=value).exists():
+            raise ValidationError(f"Database type '{value}' does not exist.")
+        return value
 
 
 class EditSourceForm(SourceForm):

@@ -73,7 +73,7 @@ class DataSource(models.Model):
         blank=True,
     )
     database_type = models.CharField(
-        max_length=100, help_text="Type of the data source. You can create a new type."
+        max_length=100, help_text="Type of the data source."
     )
     country = models.ForeignKey(
         Country,
@@ -89,10 +89,6 @@ class DataSource(models.Model):
     def save(
         self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
-        if DatabaseType.objects.filter(type=self.database_type).count() == 0:
-            db_type = DatabaseType(type=self.database_type)
-            db_type.save()
-
         super().save(force_insert, force_update, using, update_fields)
 
     def __str__(self):
