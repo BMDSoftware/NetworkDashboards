@@ -22,6 +22,16 @@ else
     python manage.py loaddata --database=achilles countries
 fi
 
+# Load Database Types data
+database_types_count=$(echo "
+from uploader.models import DatabaseType
+print(DatabaseType.objects.count())
+" | python manage.py shell)
+if [[ $database_types_count -gt 0 ]] ; then
+    echo "Database Type table has data. Skipping initial data load"
+else
+    python manage.py loaddata --database=achilles database_types
+fi
 
 # Create an user for the admin app
 echo "Creating super user"

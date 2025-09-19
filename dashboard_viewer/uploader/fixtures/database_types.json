@@ -1,0 +1,58 @@
+[
+    {
+        "model": "uploader.databasetype",
+        "pk": 1,
+        "fields": {
+            "type": "Hospital"
+        }
+    },
+    {
+        "model": "uploader.databasetype",
+        "pk": 2,
+        "fields": {
+            "type": "Gp"
+        }
+    },
+    {
+        "model": "uploader.databasetype",
+        "pk": 3,
+        "fields": {
+            "type": "Hospital, Gp"
+        }
+    },
+    {
+        "model": "uploader.databasetype",
+        "pk": 4,
+        "fields": {
+            "type": "Registry"
+        }
+    },
+    {
+        "model": "uploader.databasetype",
+        "pk": 5,
+        "fields": {
+            "type": "Ehr"
+        }
+    },
+    {
+        "model": "uploader.databasetype",
+        "pk": 6,
+        "fields": {
+            "type": "Claims"
+        }
+    },
+    {
+        "model": "uploader.databasetype",
+        "pk": 7,
+        "fields": {
+            "type": "Biobank"
+        }
+    },
+    {
+        "model": "uploader.databasetype",
+        "pk": 8,
+        "fields": {
+            "type": "Cohort"
+        }
+    }
+]
