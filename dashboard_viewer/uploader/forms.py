@@ -11,7 +11,7 @@ class SourceForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["database_type"].widget = forms.Select(
-            choices=[(obj.id, obj.type) for obj in DatabaseType.objects.all()]
+            choices=[(obj.type, obj.type) for obj in DatabaseType.objects.all()]
         )
 
     coordinates = CoordinatesField(
