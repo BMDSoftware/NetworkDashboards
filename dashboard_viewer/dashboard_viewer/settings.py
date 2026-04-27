@@ -366,6 +366,7 @@ CONSTANCE_CONFIG = {
         "Refresh materialized view statement timeout in POSTGRES (in ms). Default: 2hrs",
         int,
     ),
+    'ORDER_MATVIEW_REFRESH': (False, 'Enable alphabetical ordering for materialized view refreshes'),
 }
 
 CONSTANCE_CONFIG_FIELDSETS = OrderedDict(
@@ -383,7 +384,7 @@ CONSTANCE_CONFIG_FIELDSETS = OrderedDict(
         ("Uploader Settings", ("UPLOADER_ALLOW_EDIT_DRAFT_STATUS", "ALLOW_ONBOARDING_UPLOAD")),
         (
             "Superset",
-            ("SUPERSET_HOST", "DATABASE_DASHBOARD_IDENTIFIER", "DATABASE_FILTER_ID", "REFRESH_MATERIALIZED_TIMEOUT"),
+            ("SUPERSET_HOST", "DATABASE_DASHBOARD_IDENTIFIER", "DATABASE_FILTER_ID", "REFRESH_MATERIALIZED_TIMEOUT", "ORDER_MATVIEW_REFRESH"),
         ),
         ("Tabs (Deprecated)", ("TABS_LOGO_CONTAINER_CSS", "TABS_LOGO_IMG_CSS")),
     ]

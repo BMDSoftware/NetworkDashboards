@@ -20,6 +20,12 @@ def refresh(logger, db_id=None, query_set=None):
 
         with connections["achilles"].cursor() as cursor:
             to_refresh = MaterializedQuery.objects.all() if not query_set else query_set
+
+            if constance.config.ORDER_MATVIEW_REFRESH:
+                logger.info("Considering order of mat views in alphabetical order...")
+                # We order by matviewname to support numerical/alphabetical prefixes
+                to_refresh = to_refresh.order_by("matviewname")
+            
             total = len(to_refresh)
 
             for i, materialized_query in enumerate(to_refresh):
