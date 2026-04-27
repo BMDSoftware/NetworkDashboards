@@ -42,21 +42,3 @@ if os.environ.get("CHARTS_FOR_PIVOTED_CSV_EXPORT", None) is not None:
     CHARTS_FOR_PIVOTED_CSV_EXPORT = os.environ["CHARTS_FOR_PIVOTED_CSV_EXPORT"].split(",")
 
 SECRET_KEY = os.environ["SECRET_KEY"]
-
-CACHE_CONFIG = {
-    "CACHE_TYPE": "RedisCache",
-}
-
-FILTER_STATE_CACHE_CONFIG = {
-    "CACHE_TYPE": "RedisCache",
-    "CACHE_DEFAULT_TIMEOUT": int(timedelta(days=90).total_seconds()),
-    # should the timeout be reset when retrieving a cached value
-    "REFRESH_TIMEOUT_ON_RETRIEVAL": True,
-}
-
-EXPLORE_FORM_DATA_CACHE_CONFIG = {
-    "CACHE_TYPE": "RedisCache",
-    "CACHE_DEFAULT_TIMEOUT": int(timedelta(days=7).total_seconds()),
-    # should the timeout be reset when retrieving a cached value
-    "REFRESH_TIMEOUT_ON_RETRIEVAL": True,
-}
