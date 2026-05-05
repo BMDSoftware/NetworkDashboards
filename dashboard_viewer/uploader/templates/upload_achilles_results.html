@@ -29,7 +29,7 @@
         For more information see the CatalogueExport R-package
         <a href="https://github.com/EHDEN/CatalogueExport">
             <i class="fas fa-link"></i>
-        </a> {%if constance_config.ALLOW_ONBOARDING_UPLOAD %}<br> You can also upload an Onboarding Report {% endif %}
+        </a> {%if constance_config.ALLOW_REPORTS_UPLOAD %}<br> You can also upload an Onboarding Report, Analytical Benchmark or PeriNet Study {% endif %}
     </span>
 
 {% endblock %}
@@ -43,7 +43,7 @@
             <table class="table">
                 <thead>
                     <tr>
-                        {% if constance_config.ALLOW_ONBOARDING_UPLOAD %}
+                        {% if constance_config.ALLOW_REPORTS_UPLOAD %}
                         <th>Type</th>
                         {% endif %}
                         <th>Upload Date</th>
@@ -57,7 +57,7 @@
                 <tbody>
                 {% for up_hi, status, type in upload_history %}
                     <tr>
-                        {% if constance_config.ALLOW_ONBOARDING_UPLOAD %}
+                        {% if constance_config.ALLOW_REPORTS_UPLOAD %}
                         <td>{{ type }}</td>
                         {% endif %}
                         <td>{{ up_hi.upload_date }}</td>

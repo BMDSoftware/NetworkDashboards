@@ -1,18 +1,26 @@
 import constance
 from bootstrap_datepicker_plus import DatePickerInput
 from django import forms
+from django.core.exceptions import ValidationError
 
 from .fields import CoordinatesField
 from .models import DatabaseType, DataSource
-from django.core.exceptions import ValidationError
+from .widgets import ListTextWidget
+
 
 class SourceForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["database_type"].widget = forms.Select(
-            choices=[(obj.type, obj.type) for obj in DatabaseType.objects.all()]
-        )
+
+        if not constance.config.ALLOW_NEW_DATABASE_TYPES:
+            # standard Select dropdown
+            self.fields["database_type"].widget = forms.Select(
+                choices=[(obj.type, obj.type) for obj in DatabaseType.objects.all()]
+            )
+        else:
+            # Keep ListTextWidget for free-text entry
+            self.fields["database_type"].widget = ListTextWidget(DatabaseType.objects)
 
     coordinates = CoordinatesField(
         help_text="Coordinates for the location of the data source"
@@ -28,8 +36,15 @@ class SourceForm(forms.ModelForm):
 
     def clean_database_type(self):
         value = self.cleaned_data["database_type"].strip().title()
-        if not DatabaseType.objects.filter(type=value).exists():
-            raise ValidationError(f"Database type '{value}' does not exist.")
+        exists = DatabaseType.objects.filter(type=value).exists()
+
+        # Check if creating new types is allowed
+        if not constance.config.ALLOW_NEW_DATABASE_TYPES and not exists:
+            raise ValidationError(
+                f"Creation of new database types is disabled. "
+                f"'{value}' is not a valid existing type."
+            )
+
         return value
 
 
@@ -41,10 +56,12 @@ class EditSourceForm(SourceForm):
 
 
 class AchillesResultsForm(forms.Form):
-    if constance.config.ALLOW_ONBOARDING_UPLOAD:
+    if constance.config.ALLOW_REPORTS_UPLOAD:
         results_file = forms.FileField(required=False, label='Catalogue Export File')
     else:
         results_file = forms.FileField()
 
-class OnboardingReportForm(forms.Form):
-    onboarding_results_file = forms.FileField(required=False, label='Onboarding Report file (Optional)')
+class ReportsForm(forms.Form):
+    onboarding = forms.FileField(required=False, label='Onboarding Report file (Optional)')
+    analyticalbenchmarks = forms.FileField(required=False, label='Analytical Benchmark upload (Optional)')
+    perinetstudy = forms.FileField(required=False, label='PeriNet Study upload (Optional)')

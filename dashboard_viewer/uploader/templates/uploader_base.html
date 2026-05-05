@@ -36,16 +36,22 @@
             {% block title %}{% endblock %}
 
             <form id="uploadForm" method="POST" enctype="multipart/form-data">
-                {% if constance_config.ALLOW_ONBOARDING_UPLOAD and onboarding_form %}
+                {% if constance_config.ALLOW_REPORTS_UPLOAD and report_forms %}
                     <div class="row">
-                        <div class="col-6 col-sm-3">
+                        {# Main Achilles Form #}
+                        <div class="col-12 col-md-3">
                             {% bootstrap_form form %}
                         </div>
-                        <div class="col-6 col-sm-3">
-                            {% bootstrap_form onboarding_form %}
-                        </div>
+
+                        {# Supplemental Reports #}
+                        {% for field in report_forms %}
+                            <div class="col-12 col-md-3">
+                                {% bootstrap_field field %}
+                            </div>
+                        {% endfor %}
                     </div>
                 {% else %}
+                    {# This is needed because it corresponds to the data source creation form #}
                     {% bootstrap_form form %}
                 {% endif %}
 

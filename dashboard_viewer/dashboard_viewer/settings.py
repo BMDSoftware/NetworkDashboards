@@ -345,9 +345,9 @@ CONSTANCE_CONFIG = {
         "Css for the img tag displaying the app logo",
         str,
     ),
-    "ALLOW_ONBOARDING_UPLOAD" :(
+    "ALLOW_REPORTS_UPLOAD" :(
         False,
-        "If Onboarding reports are allowed to be uploaded, which shows a button in the uploader page if true to allow these kind of files",
+        "If data reports are allowed to be uploaded, which shows a button in the uploader page if true to allow these kind of different file uploads",
         bool,
     ),
     "CAPTION_ONBOARDING" :(
@@ -361,12 +361,28 @@ CONSTANCE_CONFIG = {
         "Caption Text for the table in the Onboarding Report Page",
         "markdown",
     ),
+    "CAPTION_ANALYTICAL_BENCHMARK": (
+      "",
+      "Caption Text for the table in the Analytical Benchmark Report Page",
+      "markdown"
+    ),
+    "CAPTION_PERINET_STUDY" : (
+      "",
+      "Caption Text for the table in the Perinet Study Report Page",
+      "markdown"
+    ),
     "REFRESH_MATERIALIZED_TIMEOUT": (
         7200000,
         "Refresh materialized view statement timeout in POSTGRES (in ms). Default: 2hrs",
         int,
     ),
     'ORDER_MATVIEW_REFRESH': (False, 'Enable alphabetical ordering for materialized view refreshes'),
+    "ALLOW_NEW_DATABASE_TYPES": (
+        False,
+        "Enable new database types to be created when a new data source is created. If set to False, users can only"
+        " choose a database type from the existing ones",
+        bool,
+    )
 }
 
 CONSTANCE_CONFIG_FIELDSETS = OrderedDict(
@@ -378,10 +394,12 @@ CONSTANCE_CONFIG_FIELDSETS = OrderedDict(
                 "UPLOADER_EXECUTE_EXPORT_PACKAGE",
                 "UPLOADER_UPLOAD",
                 "UPLOADER_AUTO_UPDATE",
-                "CAPTION_ONBOARDING"
+                "CAPTION_ONBOARDING",
+                "CAPTION_ANALYTICAL_BENCHMARK",
+                "CAPTION_PERINET_STUDY"
             ),
         ),
-        ("Uploader Settings", ("UPLOADER_ALLOW_EDIT_DRAFT_STATUS", "ALLOW_ONBOARDING_UPLOAD")),
+        ("Uploader Settings", ("UPLOADER_ALLOW_EDIT_DRAFT_STATUS", "ALLOW_REPORTS_UPLOAD", "ALLOW_NEW_DATABASE_TYPES")),
         (
             "Superset",
             ("SUPERSET_HOST", "DATABASE_DASHBOARD_IDENTIFIER", "DATABASE_FILTER_ID", "REFRESH_MATERIALIZED_TIMEOUT", "ORDER_MATVIEW_REFRESH"),

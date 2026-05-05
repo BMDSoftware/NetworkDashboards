@@ -4,6 +4,7 @@ import os
 import pathlib
 import uuid
 
+from constance import config
 from django.conf import settings
 from django.db import models
 from django_celery_results.models import TaskResult
@@ -89,6 +90,15 @@ class DataSource(models.Model):
     def save(
         self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
+        db_type_exists = DatabaseType.objects.filter(type=self.database_type).exists()
+
+        if not db_type_exists:
+            if config.ALLOW_NEW_DATABASE_TYPES:
+                # Create the new type if allowed
+                DatabaseType.objects.create(type=self.database_type)
+            else:
+                raise ValueError(f"Cannot create new DatabaseType '{self.database_type}'")
+
         super().save(force_insert, force_update, using, update_fields)
 
     def __str__(self):
@@ -169,15 +179,6 @@ def success_data_source_directory(instance, filename):
         "%Y%m%d%H%M%S%f" + "".join(pathlib.Path(filename).suffixes),
     )
 
-    return datetime.datetime.now().strftime(file_path)
-
-def onboarding_folder(instance, filename):
-    file_path = os.path.join(
-        settings.ACHILLES_RESULTS_STORAGE_PATH,
-        instance.data_source.hash,
-        "onboarding",
-        "%Y%m%d%H%M%S%f" + "".join(pathlib.Path(filename).suffixes),
-    )
     return datetime.datetime.now().strftime(file_path)
 
 
@@ -272,15 +273,40 @@ class AchillesResultsArchive(models.Model):
     p75_value = models.FloatField(null=True)
     p90_value = models.FloatField(null=True)
 
-class OnboardingReport(models.Model):
-    class Meta:
-        db_table = "onboarding_report"
-    
-    data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
-    upload_date = models.DateTimeField(auto_now_add=True)
-    uploaded_file = models.FileField(
-        null=True, upload_to=onboarding_folder
+def get_report_upload_path(instance, filename):
+    folder_map = {
+        instance.ReportType.ONBOARDING: "onboarding",
+        instance.ReportType.ANALYTICAL_BENCHMARK: "analytical_benchmark",
+        instance.ReportType.PERINET_STUDY: "perinet_study"
+    }
+
+    report_folder = folder_map.get(instance.report_type, "misc")
+    file_path = os.path.join(
+        settings.ACHILLES_RESULTS_STORAGE_PATH,
+        instance.data_source.hash,
+        report_folder,
+        "%Y%m%d%H%M%S%f" + "".join(pathlib.Path(filename).suffixes),
     )
+    return datetime.datetime.now().strftime(file_path)
+
+class DataReport(models.Model):
+    class ReportType(models.TextChoices):
+        ONBOARDING = 'OB', 'Onboarding Report'
+        ANALYTICAL_BENCHMARK = 'AB', 'Analytical Benchmark'
+        PERINET_STUDY = 'PN', 'PeriNet study'
+
+    class Meta:
+        db_table = "data_report"
+        get_latest_by = 'upload_date'
+
+    data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
+    uploaded_file = models.FileField(upload_to=get_report_upload_path)
+    report_type = models.CharField(
+        max_length=3,
+        choices=ReportType.choices,
+        default=ReportType.ONBOARDING,
+    )
+    upload_date = models.DateTimeField(auto_now_add=True)
 
     def get_status(self):
         return "Done"

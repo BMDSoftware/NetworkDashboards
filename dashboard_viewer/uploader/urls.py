@@ -19,13 +19,8 @@ urlpatterns = [
     ),
     path("", views.create_data_source, name="create_data_source"),
     path(
-        "<str:data_source>/dashboard/",
-        views.data_source_dashboard,
-        name="data_source_dashboard",
-    ),
-    path(
-        "<str:data_source>/OnboardingReport/",
-        views.show_onboarding_csv,
-        name="show_onboarding_csv"
+        "<str:data_source>/report/<str:report_type>/",
+        views.show_csv_report,
+        name="show_csv_report"
     )
 ]

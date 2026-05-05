@@ -1,28 +1,45 @@
 import itertools
 
 import constance
+import pandas as pd
 from django.contrib import messages
 from django.db import router, transaction
 from django.forms import fields
-from django.http import HttpResponseRedirect, JsonResponse
+from django.http import Http404
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import format_html, mark_safe
 from django.views.decorators.clickjacking import xframe_options_exempt
+from materialized_queries_manager.models import MaterializedQuery
+from materialized_queries_manager.tasks import refresh_materialized_views_task
 from rest_framework import viewsets
 from rest_framework.response import Response
 
-from materialized_queries_manager.models import MaterializedQuery
-from materialized_queries_manager.tasks import refresh_materialized_views_task
 from . import serializers
 from .decorators import uploader_decorator
-from .forms import AchillesResultsForm, EditSourceForm, SourceForm, OnboardingReportForm
-from .models import Country, DataSource, PendingUpload, UploadHistory, OnboardingReport
+from .forms import AchillesResultsForm, EditSourceForm, SourceForm, ReportsForm
+from .models import Country, DataSource, PendingUpload, UploadHistory, DataReport
 from .tasks import upload_results_file
-import pandas as pd
-import urllib
 
 PAGE_TITLE = "Dashboard Data Upload"
-ONBOARDING_TITLE = "Onboarding Page"
+
+REPORT_METADATA = {
+    'onboarding': {
+        'code': DataReport.ReportType.ONBOARDING,
+        'title': 'Onboarding Report',
+        'caption_key': 'CAPTION_ONBOARDING'
+    },
+    'analyticalbenchmarks': {
+        'code': DataReport.ReportType.ANALYTICAL_BENCHMARK,
+        'title': 'Analytical Benchmarks',
+        'caption_key': 'CAPTION_ANALYTICAL_BENCHMARK'
+    },
+    'perinetstudy': {
+        'code': DataReport.ReportType.PERINET_STUDY,
+        'title': 'PeriNet Study',
+        "caption_key": "CAPTION_PERINET_STUDY"
+    },
+}
 
 @uploader_decorator
 @xframe_options_exempt
@@ -35,7 +52,7 @@ def upload_achilles_results(request, *args, **kwargs):
 
     if request.method == "POST":
         form = AchillesResultsForm(request.POST, request.FILES)
-        onboarding_form = OnboardingReportForm(request.POST, request.FILES)
+        report_forms = ReportsForm(request.POST, request.FILES)
 
         if form.is_valid():
             if (request.FILES.get('results_file', None) != None):
@@ -54,34 +71,43 @@ def upload_achilles_results(request, *args, **kwargs):
                 pending_upload.task_id = task.task_id
                 pending_upload.save()
 
-        # save onboarding csv if it exists
-        if (request.FILES.get('onboarding_results_file', None) != None):
-            OnboardingReport.objects.create(
-                data_source=obj_data_source, uploaded_file=request.FILES["onboarding_results_file"]
-            )
+            report_keys = [
+                'onboarding', 
+                'analyticalbenchmarks', 
+                'perinetstudy'
+            ]
+            for key in report_keys:
+                report_file = request.FILES.get(key)
+                metadata = REPORT_METADATA.get(key)
+                if report_file is not None and metadata is not None:
+                    DataReport.objects.create(
+                        data_source=obj_data_source, 
+                        uploaded_file=report_file,
+                        report_type=metadata['code']
+                    )
 
     else:
         form = AchillesResultsForm()
-        onboarding_form = OnboardingReportForm()
+        report_forms = ReportsForm()
 
     upload_history = sorted(
         itertools.chain(
             UploadHistory.objects.filter(data_source=obj_data_source),
             PendingUpload.objects.filter(data_source=obj_data_source),
-            OnboardingReport.objects.filter(data_source=obj_data_source)
+            DataReport.objects.filter(data_source=obj_data_source)
         ),
         key=lambda upload: upload.upload_date,
         reverse=True,
     )
 
-    upload_history = list(map(lambda obj: (obj, obj.get_status(), 'Onboarding' if isinstance(obj, OnboardingReport) else 'Catalogue'), upload_history))
+    upload_history = list(map(lambda obj: (obj, obj.get_status(), obj.get_report_type_display() if isinstance(obj, DataReport) else 'Catalogue'), upload_history))
 
     return render(
         request,
         "upload_achilles_results.html",
         {
             "form": form,
-            "onboarding_form": onboarding_form,
+            "report_forms": report_forms,
             "obj_data_source": obj_data_source,
             "upload_history": upload_history,
             "submit_button_text": mark_safe("<i class='fas fa-upload'></i> Upload"),
@@ -201,16 +227,6 @@ def create_data_source(request, *_, **kwargs):
             for key in initial:
                 form.fields[key].widget.attrs["readonly"] = True
 
-            # fill the form with errors associated with each field that wasn't valid
-            # for field, msgs in aux_form.errors.items():
-            #    required_error = False
-            #    for msg in msgs:
-            #        if "required" in msg:
-            #            required_error = True
-            #            break
-
-            #    if not required_error:
-            #        form.errors[field] = msgs
         else:
             form = SourceForm(initial=initial)
 
@@ -243,7 +259,7 @@ def create_data_source(request, *_, **kwargs):
         "data_source.html",
         {
             "form": form,
-            "onboarding_form": None,
+            "report_forms": None,
             "editing": False,
             "submit_button_text": mark_safe(
                 "<i class='fas fa-plus-circle'></i> Create"
@@ -309,72 +325,20 @@ def edit_data_source(request, *_, **kwargs):
 
 @uploader_decorator
 @xframe_options_exempt
-def data_source_dashboard(request, data_source):
-    try:
-        data_source = DataSource.objects.get(hash=data_source)
-    except DataSource.DoesNotExist:
-        return render(request, "no_uploads_dashboard.html")
-
-    if data_source.uploadhistory_set.exists():
-        config = constance.config
-        
-        filter_id = config.DATABASE_FILTER_ID
-        dashboard_id = config.DATABASE_DASHBOARD_IDENTIFIER
-        acronym = data_source.acronym
-
-        # Construct the native_filters object in rison format
-        rison_str = str(
-            f"({filter_id}:("
-            f"__cache:(label:'{acronym}',validateStatus:!f,value:!('{acronym}')),"
-            f"extraFormData:(filters:!((col:acronym,op:IN,val:!('{acronym}')))),"
-            f"filterState:(label:'{acronym}',validateStatus:!f,value:!('{acronym}')),"
-            f"id:{filter_id},ownState:())"
-            f")"
-        )
-
-        # URL encode, keeping Rison-specific characters safe
-        encoded_filters = urllib.parse.quote(rison_str, safe="()!':,")
-
-        # Construct final URL
-        url = (
-            f"{config.SUPERSET_HOST}/superset/dashboard/{dashboard_id}/"
-            f"?standalone=1&native_filters={encoded_filters}"
-        )
-
-        return JsonResponse({"link": url})
-
-    # This way if there is at least one successfull upload it will redirect to the dashboards
-    # We could only check if the last upload for the data source was sucessfull
-    # -> This will not show data but it can bring a more useful message since the new data may not be processed and the graphics will contain old data
-    # -> Perhaps this is the best option has the user will expect the new data to be published and may think the graphics already
-    # contain that information
-
-    if not data_source.uploadhistory_set.exists():
-        # Check last pending upload for the data source, it may have started but not completed
-        try:
-            status_of_pd = (
-                PendingUpload.objects.filter(data_source_id=data_source.id)
-                .values_list("status", flat=True)
-                .latest("id")
-            )
-
-            if status_of_pd == 2:
-                return render(request, "still_processing_achilles.html")
-
-        except PendingUpload.DoesNotExist:
-            return render(request, "no_uploads_dashboard.html")
-
-    return render(request, "no_uploads_dashboard.html")
-
-@uploader_decorator
-@xframe_options_exempt
-def show_onboarding_csv(request, data_source):
-    df = None
+def show_csv_report(request, data_source, report_type):
     data_source_obj = None
+
+    metadata = REPORT_METADATA.get(report_type, None)      
+    if metadata is None:
+        raise Http404("Invalid report type.")
+
+    caption_key = metadata.get('caption_key')
+    report_caption = getattr(constance.config, caption_key, "")
+
     try:
         data_source_obj = DataSource.objects.get(hash=data_source)
-        on_boarding_file = OnboardingReport.objects.filter(data_source=data_source_obj.id).latest('id').uploaded_file
-        df = pd.read_csv(on_boarding_file, index_col=0)
+        report_file = DataReport.objects.filter(data_source=data_source_obj.id, report_type=metadata['code']).latest('id').uploaded_file
+        df = pd.read_csv(report_file, index_col=0)
     except:
         df = pd.DataFrame([])
 
@@ -382,8 +346,10 @@ def show_onboarding_csv(request, data_source):
                'body': df.values.tolist(),
                'constance_config': constance.config,
                'obj_data_source': data_source_obj,
-               'page_title': ONBOARDING_TITLE}
-    return render(request, "onboarding_report.html", context)
+               'page_title': metadata['title'],
+               'report_caption': report_caption}
+    
+    return render(request, "report.html", context)
 
 class DataSourceUpdate(viewsets.GenericViewSet):
     # since the edit and upload views don't have authentication, also disable
