@@ -9,12 +9,15 @@ def migrate_onboarding_data(apps, schema_editor):
 
     for old_obj in OnboardingReport.objects.all():
         # Create a new DataReport entry for every old Onboarding entry
-        DataReport.objects.create(
+        new_report = DataReport.objects.create(
             data_source=old_obj.data_source,
             uploaded_file=old_obj.uploaded_file,
-            report_type='OB',
-            upload_date=old_obj.upload_date 
+            report_type='OB'
         )
+
+        # This bypasses the auto_now_add in Data Report model for upload_date
+        # Otherwise we end up with all upload_dates equal to the time of migration
+        DataReport.objects.filter(pk=new_report.pk).update(upload_date=old_obj.upload_date)
 
 def reverse_migration(apps, schema_editor):
     DataReport = apps.get_model('uploader', 'DataReport')
