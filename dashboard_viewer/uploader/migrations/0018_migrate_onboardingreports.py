@@ -19,10 +19,6 @@ def migrate_onboarding_data(apps, schema_editor):
         # Otherwise we end up with all upload_dates equal to the time of migration
         DataReport.objects.filter(pk=new_report.pk).update(upload_date=old_obj.upload_date)
 
-def reverse_migration(apps, schema_editor):
-    DataReport = apps.get_model('uploader', 'DataReport')
-    DataReport.objects.filter(report_type='ONB').delete()
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -30,5 +26,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(migrate_onboarding_data, reverse_migration),
+        migrations.RunPython(migrate_onboarding_data),
     ]

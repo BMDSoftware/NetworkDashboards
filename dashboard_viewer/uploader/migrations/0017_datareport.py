@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             name='DataReport',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('uploaded_file', models.FileField(upload_to=uploader.models.get_report_upload_path)),
+                ('uploaded_file', models.FileField(max_length=120, upload_to=uploader.models.get_report_upload_path)),
                 ('report_type', models.CharField(choices=[('OB', 'Onboarding Report'), ('AB', 'Analytical Benchmark'), ('PN', 'PeriNet study')], default='OB', max_length=3)),
                 ('upload_date', models.DateTimeField(auto_now_add=True)),
                 ('data_source', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='uploader.datasource')),

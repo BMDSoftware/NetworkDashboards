@@ -300,7 +300,9 @@ class DataReport(models.Model):
         get_latest_by = 'upload_date'
 
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
-    uploaded_file = models.FileField(upload_to=get_report_upload_path)
+    # Caution with max length, since django can crop the name if the file name
+    # surpasses the length defined here. Default of max_length is 100, so we increase it a little bit here
+    uploaded_file = models.FileField(max_length=120, upload_to=get_report_upload_path)
     report_type = models.CharField(
         max_length=3,
         choices=ReportType.choices,
