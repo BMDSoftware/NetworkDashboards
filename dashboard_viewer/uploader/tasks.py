@@ -144,7 +144,7 @@ def upload_results_file(pending_upload_id: int):
         logger.info("Upload failed [datasource %d, upload %d]",
                          data_source.id, pending_upload_id)
 
-        if is_connection_lost(e) and isinstance(e, TemporaryFailure):
+        if is_connection_lost(e) or isinstance(e, TemporaryFailure):
             for alias in ("default", "achilles"):
                 try:
                     # The connection might not be able to be reused to update the state of the pending upload,
