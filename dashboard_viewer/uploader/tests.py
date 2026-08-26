@@ -9,11 +9,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings, tag, TestCase, TransactionTestCase
 from sqlalchemy import create_engine
 
-from .file_handler.checks import (
+from .file_handler.checks import extract_data_from_uploaded_file
+from .file_handler.errors import (
+    UploadError,
     DuplicatedMetadataRow,
     EqualFileAlreadyUploaded,
-    extract_data_from_uploaded_file,
-    FileChecksException,
     InvalidFieldValue,
     InvalidFileFormat,
     MissingFieldValue,
@@ -312,13 +312,13 @@ class ExtractDataFromUploadedFileTestCase(TestCase):
 
         try:
             extract_data_from_uploaded_file(self.file_7)
-        except FileChecksException:
+        except UploadError:
             self.fail("Exception raised")
 
     def test_all_good_16(self):
         try:
             extract_data_from_uploaded_file(self.file_16)
-        except FileChecksException:
+        except UploadError:
             self.fail("Exception raised")
 
     def test_invalid_column_count(self):
