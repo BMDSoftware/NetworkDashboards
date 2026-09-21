@@ -408,6 +408,7 @@ CONSTANCE_CONFIG_FIELDSETS = OrderedDict(
     ]
 )
 
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 @receiver(config_updated)
 def constance_updated(key, old_value, **_):

@@ -17,7 +17,9 @@ $(".coordinates-map").each((index, element) => {
     // create the map
     const map = L.map(element.id).setView([24, -36], 3);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        referrerPolicy: 'strict-origin-when-cross-origin'
     }).addTo(map);
 
     const name = element.id.substring(4);
