@@ -3,15 +3,18 @@ from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core import serializers
 from django.core.cache import caches
+from django.db import connections
 from django.db import router, transaction
+from materialized_queries_manager.utils import refresh
 from redis_rw_lock import RWLock
 
-from materialized_queries_manager.utils import refresh
 from .file_handler.checks import (
     check_for_duplicated_files,
     extract_data_from_uploaded_file,
-    upload_data_to_tmp_table,
+    validate_data_in_existing_mat_views,
 )
+from .file_handler.errors import TemporaryFailure
+from .file_handler.postgres_errors import is_connection_lost
 from .file_handler.updates import update_achilles_results_data
 from .models import AchillesResults, PendingUpload, UploadHistory
 
@@ -59,14 +62,14 @@ def upload_results_file(pending_upload_id: int):
             pending_upload_id,
         )
 
-        upload_data_to_tmp_table(data_source.id, file_metadata, pending_upload)
+        validate_data_in_existing_mat_views(data_source.id, file_metadata, pending_upload)
 
         cache = caches["workers_locks"]
 
         try:
             cache.incr("celery_workers_updating", ignore_key_check=True)
 
-            with RWLock(  # several workers can update their records in paralel -> same as -> several threads can read from the same file
+            with RWLock(  # several workers can update their records in parallel -> same as -> several threads can read from the same file
                 cache.client.get_client(),
                 "celery_worker_updating",
                 RWLock.READ,
@@ -138,8 +141,23 @@ def upload_results_file(pending_upload_id: int):
             workers_updating = cache.decr("celery_workers_updating")
 
     except Exception as e:
-        pending_upload.status = PendingUpload.STATE_FAILED
-        pending_upload.save()
+        logger.info("Upload failed [datasource %d, upload %d]",
+                         data_source.id, pending_upload_id)
+
+        if is_connection_lost(e) or isinstance(e, TemporaryFailure):
+            for alias in ("default", "achilles"):
+                try:
+                    # The connection might not be able to be reused to update the state of the pending upload,
+                    # so we close it here
+                    # When pending upload updates its state afterwards, it will create a new connection
+                    connections[alias].close()
+                    logger.info("Closed connection %s", alias)
+                except Exception:
+                    logger.info("Could not close connection %s", alias, exc_info=True)
+
+        PendingUpload.objects.filter(id=pending_upload_id).update(
+            status=PendingUpload.STATE_FAILED
+        )
 
         raise e
 

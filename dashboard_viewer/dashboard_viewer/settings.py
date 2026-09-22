@@ -157,7 +157,15 @@ ACHILLES_DB_SQLALCHEMY_ENGINE = create_engine(
     "postgresql"
     f"://{DATABASES['achilles']['USER']}:{DATABASES['achilles']['PASSWORD']}"
     f"@{DATABASES['achilles']['HOST']}:{DATABASES['achilles']['PORT']}"
-    f"/{DATABASES['achilles']['NAME']}"
+    f"/{DATABASES['achilles']['NAME']}",
+    pool_pre_ping=True,      # cheap SELECT 1 before handing out a connection
+    pool_recycle=1800,       # don't reuse anything older than 30 min
+    connect_args={
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    },
 )
 
 DATABASE_ROUTERS = ["dashboard_viewer.routers.AchillesRouter"]

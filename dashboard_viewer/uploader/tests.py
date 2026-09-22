@@ -3,17 +3,19 @@ import logging
 
 import numpy
 from celery.utils.log import get_task_logger
+from constance import config
+from constance.test import override_config
 from django.conf import settings
 from django.core.cache import caches
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings, tag, TestCase, TransactionTestCase
 from sqlalchemy import create_engine
 
-from .file_handler.checks import (
+from .file_handler.checks import extract_data_from_uploaded_file
+from .file_handler.errors import (
+    UploadError,
     DuplicatedMetadataRow,
     EqualFileAlreadyUploaded,
-    extract_data_from_uploaded_file,
-    FileChecksException,
     InvalidFieldValue,
     InvalidFileFormat,
     MissingFieldValue,
@@ -89,6 +91,9 @@ class DataSourceCreator:
         self._counter = 0
 
     def create(self):
+        if not config.ALLOW_NEW_DATABASE_TYPES:
+            raise ValueError("Creation of new database types is disabled in Constance settings.")
+
         self._counter += 1
         return DataSource.objects.create(
             name=f"test{self._counter}",
@@ -101,10 +106,25 @@ class DataSourceCreator:
             link="",
         )
 
-
 datasource_creator = DataSourceCreator()
 
+class DataSourceCreatorTestCase(TestCase):
+    databases = "__all__"
 
+    @override_config(ALLOW_NEW_DATABASE_TYPES=True)
+    def test_create_datasource_success(self):
+        creator = DataSourceCreator()
+        ds = creator.create()
+        self.assertIsNotNone(ds.pk)
+
+    @override_config(ALLOW_NEW_DATABASE_TYPES=False)
+    def test_create_datasource_blocked(self):
+        creator = DataSourceCreator()
+        with self.assertRaises(ValueError):
+            creator.create()
+
+
+@override_config(ALLOW_NEW_DATABASE_TYPES=True)
 class UpdateAchillesResultsDataTestCase(TransactionTestCase):
     databases = "__all__"
 
@@ -312,13 +332,13 @@ class ExtractDataFromUploadedFileTestCase(TestCase):
 
         try:
             extract_data_from_uploaded_file(self.file_7)
-        except FileChecksException:
+        except UploadError:
             self.fail("Exception raised")
 
     def test_all_good_16(self):
         try:
             extract_data_from_uploaded_file(self.file_16)
-        except FileChecksException:
+        except UploadError:
             self.fail("Exception raised")
 
     def test_invalid_column_count(self):
@@ -375,7 +395,7 @@ class ExtractDataFromUploadedFileTestCase(TestCase):
             file_metadata, UpdateAchillesResultsDataTestCase.file_metadata
         )
 
-
+@override_config(ALLOW_NEW_DATABASE_TYPES=True)
 class UploadResultsFileTestCase(TransactionTestCase):
     databases = "__all__"
 
