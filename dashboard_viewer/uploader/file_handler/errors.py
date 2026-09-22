@@ -1,5 +1,6 @@
 """User-facing errors for the upload pipeline."""
 
+import functools
 import uuid
 
 from .postgres_errors import (
@@ -18,6 +19,14 @@ class UploadError(Exception):
         self.details = tuple(details)
         self.incident_id = incident_id or uuid.uuid4().hex[:8].upper()
         super().__init__(self.render_text(), self.as_dict())
+
+    def __reduce__(self):
+        # Celery pickles exceptions between processes. Rebuild them through
+        # __init__ with the same values, not from self.args.
+        return (
+            functools.partial(self.__class__, details=self.details, incident_id=self.incident_id),
+            (self.what_happened,),
+        )
 
     def as_dict(self):
         return {

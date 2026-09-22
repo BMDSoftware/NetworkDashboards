@@ -189,11 +189,15 @@ def extract_data_from_uploaded_file(uploaded_file):
 
         try:
             chunk = chunk.astype(types)
-        except ValueError:
+        except OverflowError as exc:
+            raise InvalidFieldValue(
+                'Some numbers in "analysis_id" or "count_value" are too large to store.'
+            ) from exc
+        except ValueError as exc:
             raise InvalidFieldValue(
                 'The provided file has invalid values on some columns. Remember that only the "stratum_*" columns'
                 " accept strings, all the other fields expect numeric types."
-            )
+            ) from exc
 
         metadata_rows = chunk[chunk.analysis_id.isin((0, 5000))]
 
