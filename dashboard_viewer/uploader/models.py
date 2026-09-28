@@ -164,8 +164,19 @@ class PendingUpload(models.Model):
             )
 
         result = json.loads(task.result)
-        if result["exc_module"] == "uploader.file_handler.checks":
-            return result["exc_message"][0]
+        if result["exc_module"] in ("uploader.file_handler.errors",
+                                    "uploader.file_handler.checks"):
+            message = result["exc_message"]
+            if len(message) > 1 and isinstance(message[1], dict):
+                e = message[1]
+                parts = [f"<strong>{e['title']}</strong><p>{e['what_happened']}</p>"]
+                if e.get("details"):
+                    parts.append("<ul>" + "".join(f"<li>{d}</li>" for d in e["details"]) + "</ul>")
+                parts.append("<p><b>What to do next:</b></p><ol>")
+                parts += [f"<li>{s}</li>" for s in e["next_steps"]]
+                parts.append(f"</ol><small>Reference: {e['incident_id']}</small>")
+                return "".join(parts)
+            return message[0].replace("\n", "<br>")  # old rows
         return (
             "An unexpected error occurred while processing your file. Please contact the "
             "system administrator for more details."

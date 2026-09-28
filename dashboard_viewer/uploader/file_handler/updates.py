@@ -1,6 +1,5 @@
 import pandas
 from django.db import connections
-
 from uploader.models import (
     AchillesResults,
     AchillesResultsArchive,
@@ -8,6 +7,8 @@ from uploader.models import (
     PendingUpload,
     UploadHistory,
 )
+
+from .errors import translate
 
 
 def update_achilles_results_data(
@@ -23,13 +24,16 @@ def update_achilles_results_data(
         data_source_id,
         pending_upload.id,
     )
-    with connections["achilles"].cursor() as cursor:
-        move_achilles_results_records(
-            cursor,
-            AchillesResults,
-            AchillesResultsArchive,
-            data_source_id,
-        )
+
+    ctx = {"ds": data_source_id, "upload": pending_upload.id}
+
+    try:
+        with connections["achilles"].cursor() as cursor:
+            move_achilles_results_records(
+                cursor, AchillesResults, AchillesResultsArchive, data_source_id,
+            )
+    except Exception as exc:
+        raise translate(exc, "archiving the previous data", logger, **ctx) from exc
 
     reader = pandas.read_csv(
         pending_upload.uploaded_file,
@@ -47,15 +51,17 @@ def update_achilles_results_data(
         pending_upload.id,
     )
 
-    for chunk in reader:
-        chunk = chunk[chunk["stratum_1"].isin(["0"]) == False]  # noqa
-        chunk = chunk.assign(data_source_id=data_source_id)
-        chunk.to_sql(
-            AchillesResults._meta.db_table,
-            pandas_connection,
-            if_exists="append",
-            index=False,
-        )
+    try:
+        for chunk in reader:
+            chunk = chunk[chunk["stratum_1"].isin(["0"]) == False].assign(data_source_id=data_source_id)
+            chunk.to_sql(
+                AchillesResults._meta.db_table,
+                pandas_connection,
+                if_exists="append",
+                index=False,
+            )
+    except Exception as exc:
+        raise translate(exc, "saving your data", logger, **ctx) from exc
 
 
 def move_achilles_results_records(
