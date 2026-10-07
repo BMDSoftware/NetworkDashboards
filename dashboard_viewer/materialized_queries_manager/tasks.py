@@ -137,3 +137,20 @@ def create_materialized_view(  # noqa
 @shared_task
 def refresh_materialized_views_task(names):
     refresh(logger, query_set=MaterializedQuery.objects.filter(matviewname__in=names))
+
+@shared_task
+def refresh_all_materialized_views():
+    cache = caches["workers_locks"]
+    # flag is cleared only when this task holds the write lock and really starts refreshing
+    # practically, we end up at most with 1 refresh running and 1 refresh in the queue
+    def on_lock():
+        cache.delete("refresh_queued")
+        logger.info("Got write lock, flag cleared, starting refresh of all materialized views")
+
+    logger.info("Refresh All Materialized Task started, waiting for write lock...")
+    refresh(logger, on_lock_acquired=on_lock)
+
+def request_refresh():
+    # False if already queued
+    if caches["workers_locks"].add("refresh_queued", 1, timeout=2 * 3600):
+        refresh_all_materialized_views.delay()

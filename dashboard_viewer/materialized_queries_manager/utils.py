@@ -5,7 +5,7 @@ import constance
 from materialized_queries_manager.models import MaterializedQuery
 
 
-def refresh(logger, db_id=None, query_set=None):
+def refresh(logger, db_id=None, query_set=None, on_lock_acquired=None):
     cache = caches["workers_locks"]
 
     # Only one worker can update the materialized views at the same time -> same as -> only one thread
@@ -13,6 +13,9 @@ def refresh(logger, db_id=None, query_set=None):
     with RWLock(
         cache.client.get_client(), "celery_worker_updating", RWLock.WRITE, expire=None
     ):
+        if on_lock_acquired:
+            on_lock_acquired()
+
         logger.info(
             "Updating materialized views [%s]",
             "command" if not db_id else f"datasource {db_id}",
