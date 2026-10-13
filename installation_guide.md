@@ -9,11 +9,11 @@ This document provides a comprehensive guide for setting up and running the **BM
 
 ---
 
-## 1. Installation
+## 1. Prerequisites & Environment Configuration
 
 Currently, we use docker to deploy our environment
 
-### First Steps
+### 1.1 Repository Cloning & Environment Variables
 
 1. Clone the repository with the command `git clone --recurse-submodules https://github.com/EHDEN/NetworkDashboards`. If you already cloned the repository without the `--recurse-submodules` option, run `git submodule update --init` to fetch the superset submodule.
 
@@ -21,35 +21,103 @@ Currently, we use docker to deploy our environment
 
    2.1 If you will use this application as a third-party application and will iframe it, set the variable `SINGLE_APPLICATION_MODE` to `False` and define the host of the main application on the variable `MAIN_APPLICATION_HOST`. Also make sure to add this last host to the list of `ALLOWED_HOSTS`.
 
-### Dashboard Viewer setup
+### 1.2 Domain Configuration
 
 1. If you wish to expose the dashboard viewer app through a specific domain(s) you must add it/them to the `ALLOWED_HOSTS` list on file `dashboard_viewer/dashboard_viewer/settings.py` and remove the `'*'` entry.
 
-2. In production, all of our docker services use prebuilt images present in DockerHub, however, if you are in development mode and are using the `docker-compose-dev.yml`, you should build the images for the dashboard containers with `docker-compose build`.
+---
 
-3. Set up the database and create an admin account for the dashboard viewer app: `docker-compose run --rm dashboard ./docker-init.sh`.
+## 2. Docker Compose Environments: Production vs. Development
 
-### Insert Concepts
+### Production vs. Development Compose Files
 
-The concepts table is not in the repository due to its dimension, therefore we use directly the Postgres console to insert this table in the installation.
+The architecture supports two deployment configurations depending on the target environment:
+
+* **Production Environment (`docker-compose.yml`):**  
+  Uses pre-built, production-ready images directly from Docker Hub (`bmdsoftware/dashboard:5.0.3-RC`, `bmdsoftware/superset:5.0.2`, etc.). It runs without local volume mounts for application source code, ensuring maximum stability, security, and reproducibility across deployments.
+
+* **Development Environment (`docker-compose-dev.yml`):**  
+  Tailored for local feature development, debugging, and testing. It mounts local repository directories (such as `../dashboard_viewer`) directly into the running containers as live volumes. This enables real-time code reloading without needing to rebuild the entire container image for every code change.
+
+### Image Architecture and Local Loading
+
+In **development mode**, the services map to the following base images:
+
+* **Dashboard Viewer:** `bmdsoftware/dashboard:5.0.3-RC`
+* **Apache Superset:** `bmdsoftware/superset:5.0.2`
+* **PostgreSQL Database:** `postgres:10`
+* **Redis Cache:** `redis:3.2`
+* **Nginx Reverse Proxy:** `nginx:1.18.0`
+
+When running `docker-compose -f docker-compose-dev.yml up`or `build`, Docker downloads or reuses locally cached instances of these base images. If you have access to local image archive files (`.tar.gz`), you can import them manually into Docker prior to startup:
+
+   ```powershell
+   docker load -i bmdsoftware_superset_5.0.2.tar.gz
+   docker load -i bmdsoftware_dashboards_5.0.3-RC.tar.gz
+   ```
+
+---
+
+## 3. Step-by-Step Installation & Setup Sequence
+
+All step-by-step commands in this guide target the **local development** setup using `-f docker-compose-dev.yml`. 
+
+> **Note on Command Syntax:**  
+> The command workflow for production (`docker-compose.yml`) and development (`docker-compose-dev.yml`) is essentially the same. If running in production, you simply omit the `-f docker-compose-dev.yml` flag (letting Docker use the default `docker-compose.yml`) and skip the local `build` step, as production pulls pre-built images directly from Docker Hub.
+
+For **local development**, follow this 5 step sequence in PowerShell/Terminal to build, initialize, and start all containers:
+
+### Step 1: Clean Environment (Optional)
+
+Stop existing containers and purge corrupted volumes or orphan containers:
+
+   ```powershell
+   docker-compose -f docker-compose-dev.yml down -v --remove-orphans
+   ```
+
+### Step 2: Build & Start Containers
+
+Build the Dashboard image locally and start all stack services in the background:
+
+   ```powershell
+   docker-compose -f docker-compose-dev.yml build --no-cache dashboard
+   
+   docker-compose -f docker-compose-dev.yml up -d 
+   ```
+
+### Step 3: Base Database Initialization
+
+Execute initialization scripts to run Django migrations and set up Superset permissions:
+
+   ```powershell
+   # Initialize Django database schema and create admin account
+   docker-compose -f docker-compose-dev.yml run --rm dashboard ./docker-init.sh
+
+   # Initialize Superset roles, permissions, and database schema
+   docker-compose -f docker-compose-dev.yml run --rm superset-init
+   ```
+
+### Step 4: Import Athena Concepts Table
+
+Because of its large size, the Athena concept vocabulary table is inserted directly into the running PostgreSQL container:
 
 1. Get your concept csv file from [Athena](https://athena.ohdsi.org/)
 
 2. Copy the file into postgres container
 
    ```sh
-   docker cp concept.csv dashboard_viewer_postgres_1:/tmp/
+   docker cp concept.csv dashboard_viewer-postgres-1:/tmp/
    ```
 
 3. Enter in the postgres container:
 
    ```sh
-   docker exec -it dashboard_viewer_postgres_1 bash
+   docker exec -it dashboard_viewer-postgres-1 bash
    ```
 
 4. Enter in the `achilles`  database (value of the variable `POSTGRES_ACHILLES_DB` on the .env file) with the `root` user (value of the variable `POSTGRES_ROOT_USER` on the .env file):
 
-   ```
+   ```sh
    psql achilles root
    ```
 
@@ -92,84 +160,17 @@ The concepts table is not in the repository due to its dimension, therefore we u
    ALTER TABLE concept OWNER TO achilles;
    ```
 
----
+9. Exit psql and the container shell (`exit`).
 
-## 2. Docker Compose Environments: Production vs. Development
+### Step 5: Post-Setup & Asset Compilation
 
-### Production vs. Development Compose Files
+Refresh Django materialized views and compile static assets:
 
-The architecture supports two deployment configurations depending on the target environment:
+   ```powershell
+   docker-compose -f docker-compose-dev.yml run --rm dashboard python manage.py refresh_mat_views
 
-* **Production Environment (`docker-compose.yml`):**  
-  Uses pre-built, production-ready images directly from Docker Hub (`bmdsoftware/dashboard:5.0.3-RC`, `bmdsoftware/superset:5.0.2`, etc.). It runs without local volume mounts for application source code, ensuring maximum stability, security, and reproducibility across deployments.
-
-* **Development Environment (`docker-compose-dev.yml`):**  
-  Tailored for local feature development, debugging, and testing. It mounts local repository directories (such as `../dashboard_viewer`) directly into the running containers as live volumes. This enables real-time code reloading without needing to rebuild the entire container image for every code change.
-
-### Image Architecture and Local Loading
-
-In **development mode**, the services map to the following base images:
-
-* **Dashboard Viewer:** `bmdsoftware/dashboard:5.0.3-RC`
-* **Apache Superset:** `bmdsoftware/superset:5.0.2`
-* **PostgreSQL Database:** `postgres:10`
-* **Redis Cache:** `redis:3.2`
-* **Nginx Reverse Proxy:** `nginx:1.18.0`
-
-When running `docker-compose -f docker-compose-dev.yml up`or `build`, Docker downloads or reuses locally cached instances of these base images. If you have access to local image archive files (`.tar.gz`), you can import them manually into Docker prior to startup:
-
-```powershell
-    docker load -i bmdsoftware_superset_5.0.2.tar.gz
-    docker load -i bmdsoftware_dashboards_5.0.3-RC.tar.gz
-```
-
----
-
-## 3. Step-by-Step Environment Setup
-
-All step-by-step commands in this guide target the **local development** setup using `-f docker-compose-dev.yml`. 
-
-> **Note on Command Syntax:**  
-> The command workflow for production (`docker-compose.yml`) and development (`docker-compose-dev.yml`) is essentially the same. If running in production, you simply omit the `-f docker-compose-dev.yml` flag (letting Docker use the default `docker-compose.yml`) and skip the local `build` step, as production pulls pre-built images directly from Docker Hub.
-
-For **local development**, follow this sequence in PowerShell/Terminal to build, initialize, and start all containers:
-
-1. **(Optional)** Stop existing containers and purge corrupted volumes/orphans
-
-    ```powershell
-    docker-compose -f docker-compose-dev.yml down -v --remove-orphans
-    ```
-
-2. Build the Dashboard image (using --no-cache to apply setuptools fixes)
-
-    ```powershell
-    docker-compose -f docker-compose-dev.yml build --no-cache dashboard
-    ```
-
-3. Start all services
-
-    ```powershell
-    docker-compose -f docker-compose-dev.yml up -d 
-    ```
-
-4. Execute the Django initialization script (database migrations)
-
-    ```powershell
-    docker-compose -f docker-compose-dev.yml run --rm dashboard ./docker-init.sh
-    ```
-
-5. Initialize Superset roles, permissions, and database
-
-    ```powershell
-    docker-compose -f docker-compose-dev.yml run --rm superset-init
-    ```
-
-6. Refresh materialized queries and collect static assets
-
-    ```powershell
-    docker-compose -f docker-compose-dev.yml run --rm dashboard python manage.py refresh_mat_views
-    docker-compose -f docker-compose-dev.yml run --rm dashboard python manage.py collectstatic --noinput
-    ```
+   docker-compose -f docker-compose-dev.yml run --rm dashboard python manage.py collectstatic --noinput
+   ```
 
 ---
 
