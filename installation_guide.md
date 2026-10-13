@@ -160,7 +160,7 @@ Because of its large size, the Athena concept vocabulary table is inserted direc
    ALTER TABLE concept OWNER TO achilles;
    ```
 
-9. Exit psql and the container shell (`exit`).
+9. Exit psql (`\q`) and the container shell (`exit`).
 
 ### Step 5: Post-Setup & Asset Compilation
 
