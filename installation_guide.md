@@ -3,7 +3,7 @@ output: html_document
 ---
 
 
-# Installation, Setup & Troubleshooting Guide (Development Environment)
+# Installation, Setup & Troubleshooting Guide
 
 This document provides a comprehensive guide for setting up and running the **BMD Software NetworkDashboards** development environment using Docker, along with a detailed record of technical issues encountered during initial execution and their resolutions.
 
@@ -88,15 +88,27 @@ The concepts table is not in the repository due to its dimension, therefore we u
 
 8. Set the owner of the `concept` table to the `achilles` user (value of the variable `POSTGRES_ACHILLES_USER` on the .env file):
 
-   ```
-   ALTER TABLE concept OWNER TO achilles
+   ```sql
+   ALTER TABLE concept OWNER TO achilles;
    ```
 
 ---
 
-## 2. Docker Images and Service Mapping
+## 2. Docker Compose Environments: Production vs. Development
 
-The project architecture relies on pre-built images hosted on Docker Hub (or built locally from project contexts):
+### Production vs. Development Compose Files
+
+The architecture supports two deployment configurations depending on the target environment:
+
+* **Production Environment (`docker-compose.yml`):**  
+  Uses pre-built, production-ready images directly from Docker Hub (`bmdsoftware/dashboard:5.0.3-RC`, `bmdsoftware/superset:5.0.2`, etc.). It runs without local volume mounts for application source code, ensuring maximum stability, security, and reproducibility across deployments.
+
+* **Development Environment (`docker-compose-dev.yml`):**  
+  Tailored for local feature development, debugging, and testing. It mounts local repository directories (such as `../dashboard_viewer`) directly into the running containers as live volumes. This enables real-time code reloading without needing to rebuild the entire container image for every code change.
+
+### Image Architecture and Local Loading
+
+In **development mode**, the services map to the following base images:
 
 * **Dashboard Viewer:** `bmdsoftware/dashboard:5.0.3-RC`
 * **Apache Superset:** `bmdsoftware/superset:5.0.2`
@@ -104,11 +116,7 @@ The project architecture relies on pre-built images hosted on Docker Hub (or bui
 * **Redis Cache:** `redis:3.2`
 * **Nginx Reverse Proxy:** `nginx:1.18.0`
 
-### Image Pulling and Loading
-
-When running `docker-compose up` or `build`, Docker downloads or reuses locally cached instances of these base images. In the development environment (`docker-compose-dev.yml`), local source code (`../dashboard_viewer`) is mounted directly into running containers via volume bindings to allow.
-
-If you have access to these instances, you can load them manually, as shown in this example.
+When running `docker-compose -f docker-compose-dev.yml up`or `build`, Docker downloads or reuses locally cached instances of these base images. If you have access to local image archive files (`.tar.gz`), you can import them manually into Docker prior to startup:
 
 ```powershell
     docker load -i bmdsoftware_superset_5.0.2.tar.gz
@@ -119,8 +127,12 @@ If you have access to these instances, you can load them manually, as shown in t
 
 ## 3. Step-by-Step Environment Setup
 
-For dashboard and superset setup you can follow this sequence in PowerShell/Terminal to build, initialize, and start all containers:
+All step-by-step commands in this guide target the **local development** setup using `-f docker-compose-dev.yml`. 
 
+> **Note on Command Syntax:**  
+> The command workflow for production (`docker-compose.yml`) and development (`docker-compose-dev.yml`) is essentially the same. If running in production, you simply omit the `-f docker-compose-dev.yml` flag (letting Docker use the default `docker-compose.yml`) and skip the local `build` step, as production pulls pre-built images directly from Docker Hub.
+
+For **local development**, follow this sequence in PowerShell/Terminal to build, initialize, and start all containers:
 
 1. **(Optional)** Stop existing containers and purge corrupted volumes/orphans
 
