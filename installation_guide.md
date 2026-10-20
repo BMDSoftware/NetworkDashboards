@@ -1,4 +1,4 @@
-# Installation, Setup & Troubleshooting Guide (Development Environment)
+# Installation, Setup & Troubleshooting Guide 
 
 This document provides a comprehensive guide for setting up and running the **BMD Software NetworkDashboards** development environment using Docker, along with a detailed record of technical issues encountered during initial execution and their resolutions.
 
@@ -146,7 +146,9 @@ The concepts table is not in the repository due to its dimension, therefore we u
    ```sql
    ALTER TABLE concept OWNER TO achilles;
    ```
-
+   
+9. Exit psql (`\q`) and the container shell (`exit`).
+   
 ### Step 5: Post-Setup & Asset compilation
 
 ```powershell
