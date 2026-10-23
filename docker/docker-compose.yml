@@ -66,7 +66,7 @@ version: "3.7"
 services:
   #### SUPERSET ####
   superset:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
     restart: unless-stopped
     environment: *superset-environment
@@ -77,7 +77,7 @@ services:
       - ${SUPERSET_PORT}:8088
 
   superset-init:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-init.sh"]
     environment: *superset-environment
     user: "root"
@@ -85,7 +85,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-bootstrap.sh", "worker"]
     restart: unless-stopped
     environment: *superset-environment
@@ -94,7 +94,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker-beat:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-bootstrap.sh", "beat"]
     restart: unless-stopped
     environment: *superset-environment
@@ -105,12 +105,16 @@ services:
   #### DATA ####
   redis:
     image: redis:3.2
+    ports:
+      - "6379:6379"
     restart: unless-stopped
     volumes:
-      - ${VOLUMES_PATH}/redis:/data
+      - redis_data:/data
 
   postgres:
     image: postgres:10
+    ports:
+      - "5432:5432"
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_ROOT_USER}
@@ -121,9 +125,8 @@ services:
       POSTGRES_DBS_USERS: ${POSTGRES_SUPERSET_USER} ${POSTGRES_DASHBOARD_VIEWER_USER} ${POSTGRES_ACHILLES_USER}
       POSTGRES_DBS_PASSWORDS: ${POSTGRES_SUPERSET_PASSWORD} ${POSTGRES_DASHBOARD_VIEWER_PASSWORD} ${POSTGRES_ACHILLES_PASSWORD}
     volumes:
-      - ${VOLUMES_PATH}/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
       - ./postgres-entrypoint:/docker-entrypoint-initdb.d
-      - ./logs:/var/lib/postgresql/data/log
 
   #### DASHBOARD ####
   nginx:
@@ -139,7 +142,7 @@ services:
       - dashboard
 
   dashboard_worker:
-    image: bmdsoftware/networkdashboards
+    image: bmdsoftware/dashboard:5.0.3-RC
     environment: *dashboard-environment
     command: /app/docker-entrypoint-worker.sh
     restart: unless-stopped
@@ -148,7 +151,7 @@ services:
       - ../dashboard_viewer/media:/app/media
 
   dashboard:
-    image: bmdsoftware/networkdashboards
+    image: bmdsoftware/dashboard:5.0.3-RC
     environment: *dashboard-environment
     depends_on: *depends-on
     restart: unless-stopped
@@ -159,3 +162,5 @@ services:
 volumes:
   superset_home:
   dashboard_static:
+  redis_data:
+  postgres_data:
