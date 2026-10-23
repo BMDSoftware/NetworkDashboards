@@ -110,15 +110,25 @@ class DataSource(models.Model):
 
 
 def failure_data_source_directory(instance, filename):
+    clean_filename = os.path.basename(filename)
     file_path = os.path.join(
         settings.ACHILLES_RESULTS_STORAGE_PATH,
         instance.data_source.hash,
         "failure",
-        "%Y%m%d%H%M%S%f" + "".join(pathlib.Path(filename).suffixes),
+        "%Y%m%d%H%M%S%f_" + clean_filename, 
     )
-
     return datetime.datetime.now().strftime(file_path)
 
+
+def success_data_source_directory(instance, filename):
+    clean_filename = os.path.basename(filename)
+    file_path = os.path.join(
+        settings.ACHILLES_RESULTS_STORAGE_PATH,
+        instance.data_source.hash,
+        "success",
+        "%Y%m%d%H%M%S%f_" + clean_filename,  
+    )
+    return datetime.datetime.now().strftime(file_path)
 
 class PendingUpload(models.Model):
     STATE_PENDING = 1
@@ -141,6 +151,7 @@ class PendingUpload(models.Model):
     status = models.IntegerField(choices=STATES, default=STATE_PENDING)
     uploaded_file = models.FileField(upload_to=failure_data_source_directory)
     task_id = models.CharField(max_length=255, null=True)
+    original_filename = models.CharField(max_length=255, null=True, blank=True)
 
     def get_status(self):
         for status_id, name in self.STATES:
@@ -182,21 +193,9 @@ class PendingUpload(models.Model):
             "system administrator for more details."
         )
 
-
-def success_data_source_directory(instance, filename):
-    file_path = os.path.join(
-        settings.ACHILLES_RESULTS_STORAGE_PATH,
-        instance.data_source.hash,
-        "success",
-        "%Y%m%d%H%M%S%f" + "".join(pathlib.Path(filename).suffixes),
-    )
-
-    return datetime.datetime.now().strftime(file_path)
-
-
 class UploadHistory(models.Model):
     """
-    Successful uploads only
+    Successful uploads (including partial uploads with warnings)
     """
 
     class Meta:
@@ -213,12 +212,20 @@ class UploadHistory(models.Model):
     vocabulary_version = models.CharField(max_length=50, null=True)
     uploaded_file = models.FileField(
         null=True, upload_to=success_data_source_directory
-    )  # For backwards compatibility its easier to make this null=True
+    )
     pending_upload_id = models.IntegerField(
         null=True,
         help_text="The id of the PendingUpload record that originated this successful upload."
-        # aspedrosa: A foreign key is not used here since a PendingUpload record is erased once is successful. This
-        #  is field is then only used to get the result data of pending upload through the get_upload_task_status view
+    )
+
+    errors_summary = models.JSONField(
+        null=True, 
+        blank=True, 
+        help_text="List in JSON with the errors/warnings collected during the upload."
+    )
+    has_warnings = models.BooleanField(
+        default=False, 
+        help_text="Indicates if the file was uploaded with partial errors ignored."
     )
 
     def __repr__(self):
@@ -228,6 +235,8 @@ class UploadHistory(models.Model):
         return f"{self.data_source.name} - {self.upload_date}"
 
     def get_status(self):
+        if self.has_warnings:
+            return "Done with Warnings"
         return "Done"
 
 
@@ -312,8 +321,6 @@ class DataReport(models.Model):
         get_latest_by = 'upload_date'
 
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
-    # Caution with max length, since django can crop the name if the file name
-    # surpasses the length defined here. Default of max_length is 100, so we increase it a little bit here
     uploaded_file = models.FileField(max_length=120, upload_to=get_report_upload_path)
     report_type = models.CharField(
         max_length=3,

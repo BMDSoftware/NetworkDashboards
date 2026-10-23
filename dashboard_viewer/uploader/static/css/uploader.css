@@ -1,4 +1,3 @@
-
 #pageloader {
   background: rgba( 255, 255, 255, 0.6 );
   display: none;
@@ -56,4 +55,67 @@ form {
 
 .status-done {
   color: forestgreen;
+}
+
+
+/* Styles for badges and actions on upload history */
+.upload-history-table .badge {
+  font-size: 0.85rem;
+  padding: 0.4em 0.6em;
+  font-weight: 600;
+  border-radius: 4px;
+}
+
+.badge-success {
+  background-color: #28a745;
+  color: #fff;
+}
+
+.badge-warning {
+  background-color: #ffc107;
+  color: #212529;
+}
+
+.badge-danger {
+  background-color: #dc3545;
+  color: #fff;
+}
+
+.badge-info {
+  background-color: #17a2b8;
+  color: #fff;
+}
+
+.btn-outline-warning {
+  border-color: #ffc107;
+  color: #856404;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-outline-warning:hover {
+  background-color: #ffc107;
+  color: #212529;
+}
+
+/* Mini bar container */
+.table-progress-box {
+    min-width: 160px;
+    max-width: 220px;
+}
+
+.table-progress-bar-container {
+    height: 16px !important;
+    border-radius: 8px !important;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 16px;
+    margin-bottom: 3px;
+}
+
+.table-progress-subtext {
+    font-size: 11px;
+    color: #6c757d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
