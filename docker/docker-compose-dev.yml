@@ -137,7 +137,6 @@ services:
     volumes:
       - ./volumes/postgres:/var/lib/postgresql/data
       - ./postgres-entrypoint:/docker-entrypoint-initdb.d
-      - ./logs:/var/lib/postgresql/data/log
 
   ### DASHBOARD ###
 
