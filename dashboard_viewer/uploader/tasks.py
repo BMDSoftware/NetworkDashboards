@@ -41,10 +41,30 @@ def upload_results_file(self, pending_upload_id: int):
     logger.info("Started to process file [datasource %d, pending upload %d]", data_source.id, pending_upload_id)
 
     try:
+        # To prevent the database owner from uploading the same data to the datasource
+
+        logger.info(
+            "Verifying Checksum of the upload file with recent data [datasource %d, pending upload %d]",
+            data_source.id,
+            pending_upload.id,
+        )
+
         check_for_duplicated_files(pending_upload.uploaded_file, data_source.id)
+       
+        logger.info(
+            "Checking file format and data [datasource %d, pending upload %d]",
+            data_source.id,
+            pending_upload_id,
+        )
 
         _, data, valid_df, parsing_errors = extract_data_from_uploaded_file_tolerant(
             pending_upload.uploaded_file
+        )
+
+        logger.info(
+            "Validating if data is not corrupted [datasource %d, pending upload %d]",
+            data_source.id,
+            pending_upload_id,
         )
 
         self.update_state(state='PROGRESS', meta={'percent': 40, 'step': 'Simulating Materialized Views...'})
@@ -63,16 +83,22 @@ def upload_results_file(self, pending_upload_id: int):
         try:
             cache.incr("celery_workers_updating", ignore_key_check=True)
 
-            with RWLock(
+            with RWLock(# several workers can update their records in parallel -> same as -> several threads can read from the same file
                 cache.client.get_client(),
                 "celery_worker_updating",
                 RWLock.READ,
                 expire=None,
-            ), cache.lock(
+            ), cache.lock(  # but only one worker can make updates associated to a specific data source at the same time
                 f"celery_worker_lock_db_{data_source.id}"
             ), transaction.atomic(
                 using=router.db_for_write(AchillesResults)
             ), settings.ACHILLES_DB_SQLALCHEMY_ENGINE.connect() as pandas_connection, pandas_connection.begin():
+
+                logger.info(
+                    "Updating results data [datasource %d, pending upload %d]",
+                    data_source.id,
+                    pending_upload_id,
+                )
 
                 update_achilles_results_from_df(
                     logger,
@@ -81,8 +107,20 @@ def upload_results_file(self, pending_upload_id: int):
                     pandas_connection,
                 )
 
+                logger.info(
+                    "Saving data source release date [datasource %d, pending upload %d]",
+                    data_source.id,
+                    pending_upload_id,
+                )
+
                 data_source.release_date = data["source_release_date"]
                 data_source.save()
+
+                logger.info(
+                    "Creating an upload history record [datasource %d, pending upload %d]",
+                    data_source.id,
+                    pending_upload_id,
+                )
                 
                 pending_upload.uploaded_file.seek(0)
 
@@ -91,6 +129,12 @@ def upload_results_file(self, pending_upload_id: int):
                 )
 
                 file_hash = _calculate_sha256(pending_upload.uploaded_file.path) if os.path.exists(pending_upload.uploaded_file.path) else None
+
+                logger.info(
+                    "Deleting pending upload [datasource %d, pending upload %d]",
+                    data_source.id,
+                    pending_upload_id,
+                )
 
                 logger.debug(
                     "PERFORMANCE: File '%s' (%d rows) processed in %.2f seconds [Datasource ID: %d]",
@@ -108,15 +152,21 @@ def upload_results_file(self, pending_upload_id: int):
 
         if is_connection_lost(e) or isinstance(e, TemporaryFailure):
             for alias in ("default", "achilles"):
-                try:
+                try:# The connection might not be able to be reused to update the state of the pending upload,
+                    # so we close it here
+                    # When pending upload updates its state afterwards, it will create a new connectio
                     connections[alias].close()
                 except Exception:
+                    logger.info("Could not close connection %s", alias, exc_info=True)
                     pass
 
         PendingUpload.objects.filter(id=pending_upload_id).update(
             status=PendingUpload.STATE_FAILED
         )
         raise e
+
+    # The lines below can be used to later update materialized views of each chart
+    # To be more efficient, they should only be updated when the is no more workers inserting records
 
     ingestion_end_time = timezone.now()
     ingestion_duration = (ingestion_end_time - start_time).total_seconds()

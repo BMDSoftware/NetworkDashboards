@@ -96,6 +96,7 @@ def _generate_file_reader(uploaded_file):
         file_reader = pandas.read_csv(
             uploaded_file,
             header=0,
+            names=columns,
             dtype=str,
             skip_blank_lines=False,
             index_col=False,
@@ -226,8 +227,8 @@ def _calculate_sha256(file_path):
 
 def check_for_duplicated_files(uploaded_file, data_source_id):
     """
-    Verifies if the uploaded file is an exact copy of any previously 
-    submitted file for this data source.
+    Verifies if the uploaded file is an exact copy of the latest successfully 
+    uploaded file for this data source.
     """
     if not uploaded_file or not hasattr(uploaded_file, 'path') or not os.path.exists(uploaded_file.path):
         return
@@ -236,23 +237,25 @@ def check_for_duplicated_files(uploaded_file, data_source_id):
     if not incoming_hash:
         return
 
-    history_records = UploadHistory.objects.filter(
-        data_source_id=data_source_id
-    ).only("errors_summary", "uploaded_file", "upload_date")
+    try:
+        latest_upload = UploadHistory.objects.filter(
+            data_source_id=data_source_id
+        ).latest('upload_date')
+    except UploadHistory.DoesNotExist:
+        return
 
-    for upload in history_records:
-        stored_hash = None
-        if isinstance(upload.errors_summary, dict):
-            stored_hash = upload.errors_summary.get("file_hash")
+    stored_hash = None
+    if isinstance(latest_upload.errors_summary, dict):
+        stored_hash = latest_upload.errors_summary.get("file_hash")
 
-        if not stored_hash and upload.uploaded_file and os.path.exists(upload.uploaded_file.path):
-            stored_hash = _calculate_sha256(upload.uploaded_file.path)
+    if not stored_hash and latest_upload.uploaded_file and os.path.exists(latest_upload.uploaded_file.path):
+        stored_hash = _calculate_sha256(latest_upload.uploaded_file.path)
 
-        if stored_hash and stored_hash == incoming_hash:
-            raise EqualFileAlreadyUploaded(
-                f"This exact file has already been uploaded for this datasource on {upload.upload_date.strftime('%Y-%m-%d %H:%M')}."
-            )
-
+    if stored_hash and stored_hash == incoming_hash:
+        raise EqualFileAlreadyUploaded(
+            f"This exact file has already been uploaded for this datasource on {latest_upload.upload_date.strftime('%Y-%m-%d %H:%M')}."
+        )
+    
 def _get_mat_view_queries():
     """Extracts view definitions, redirects to staging table"""
     all_mat_views = MaterializedQuery.objects.exclude(matviewname__contains="tmp")

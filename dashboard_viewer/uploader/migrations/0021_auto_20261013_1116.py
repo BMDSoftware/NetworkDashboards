@@ -13,11 +13,11 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='uploadhistory',
             name='errors_summary',
-            field=models.JSONField(blank=True, help_text='Lista em JSON com os erros/avisos recolhidos durante o upload.', null=True),
+            field=models.JSONField(blank=True, help_text='List of errors/warnings collected during the upload.', null=True),
         ),
         migrations.AddField(
             model_name='uploadhistory',
             name='has_warnings',
-            field=models.BooleanField(default=False, help_text='Indica se o ficheiro foi carregado com erros parciais ignorados.'),
+            field=models.BooleanField(default=False, help_text='Indicates if the file was uploaded with partial errors ignored.'),
         ),
     ]
