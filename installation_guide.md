@@ -176,7 +176,6 @@ To prevent Python package incompatibilities and missing static asset errors, the
 
 Once all services are running:
 
-* **Dashboard Viewer (via Nginx Proxy):** [http://localhost](http://localhost)
 * **Dashboard Viewer (Direct Django Dev Port):** [http://localhost:8000](http://localhost:8000)
 * **Apache Superset:** [http://localhost:8088](http://localhost:8088)
 
