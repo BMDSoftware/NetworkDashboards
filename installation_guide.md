@@ -151,7 +151,10 @@ The concepts table is not in the repository due to its dimension, therefore we u
    
 ### Step 5: Post-Setup & Asset compilation
 
+In development mode, ensure node modules are present in the mounted local directory before collecting static assets:
+
 ```powershell
+docker-compose -f docker-compose-dev.yml run --rm dashboard npm install
 docker-compose -f docker-compose-dev.yml run --rm dashboard python manage.py refresh_mat_views
 docker-compose -f docker-compose-dev.yml run --rm dashboard python manage.py collectstatic --noinput
 ```
