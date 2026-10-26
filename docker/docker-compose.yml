@@ -105,28 +105,25 @@ services:
   #### DATA ####
   redis:
     image: redis:3.2
-    ports:
-      - "6379:6379"
     restart: unless-stopped
     volumes:
-      - redis_data:/data
+      - ${VOLUMES_PATH}/redis:/data
 
   postgres:
     image: postgres:10
-    ports:
-      - "5432:5432"
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_ROOT_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD}
-      # Variables below are used to iniliaze databases for the
-      #  services below (superset and dashboard_viewer).
+      # Variables below are used to initialize databases for the
+      # services below (superset and dashboard_viewer).
       POSTGRES_DBS: ${POSTGRES_SUPERSET_DB} ${POSTGRES_DASHBOARD_VIEWER_DB} ${POSTGRES_ACHILLES_DB}
       POSTGRES_DBS_USERS: ${POSTGRES_SUPERSET_USER} ${POSTGRES_DASHBOARD_VIEWER_USER} ${POSTGRES_ACHILLES_USER}
       POSTGRES_DBS_PASSWORDS: ${POSTGRES_SUPERSET_PASSWORD} ${POSTGRES_DASHBOARD_VIEWER_PASSWORD} ${POSTGRES_ACHILLES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ${VOLUMES_PATH}/postgres:/var/lib/postgresql/data
       - ./postgres-entrypoint:/docker-entrypoint-initdb.d
+      - ./logs:/var/lib/postgresql/data/log
 
   #### DASHBOARD ####
   nginx:
@@ -162,5 +159,3 @@ services:
 volumes:
   superset_home:
   dashboard_static:
-  redis_data:
-  postgres_data:

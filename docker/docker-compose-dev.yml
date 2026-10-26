@@ -114,13 +114,13 @@ services:
     image: redis:3.2
     restart: unless-stopped
     volumes:
-      - redis_data:/data
+      - ./volumes/redis:/data
 
   postgres:
     image: postgres:10
     restart: unless-stopped
     ports:
-    - "5432:5432"
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ROOT_USER}"]
       interval: 5s
@@ -129,31 +129,18 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_ROOT_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD}
-      # Variables below are used to iniliaze databases for the
-      #  services below (superset and dashboard_viewer).
+      # Variables below are used to initialize databases for the
+      # services below (superset and dashboard_viewer).
       POSTGRES_DBS: ${POSTGRES_SUPERSET_DB} ${POSTGRES_DASHBOARD_VIEWER_DB} ${POSTGRES_ACHILLES_DB}
       POSTGRES_DBS_USERS: ${POSTGRES_SUPERSET_USER} ${POSTGRES_DASHBOARD_VIEWER_USER} ${POSTGRES_ACHILLES_USER}
       POSTGRES_DBS_PASSWORDS: ${POSTGRES_SUPERSET_PASSWORD} ${POSTGRES_DASHBOARD_VIEWER_PASSWORD} ${POSTGRES_ACHILLES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./volumes/postgres:/var/lib/postgresql/data
       - ./postgres-entrypoint:/docker-entrypoint-initdb.d
+      - ./logs:/var/lib/postgresql/data/log
 
   ### DASHBOARD ###
 
-  #nginx was added to serve the dashboard viewer static files and media files
-  nginx:
-    image: nginx:1.18.0
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx-config:/etc/nginx/conf.d
-      - dashboard_static:/static/dashboard
-      - ../dashboard_viewer/media:/media
-    depends_on:
-      dashboard:
-        condition: service_started
-        
   dashboard_worker:
     image: bmdsoftware/dashboard:5.0.3-RC
     build: *dashboard-build
@@ -164,19 +151,17 @@ services:
     volumes:
       - ../dashboard_viewer/media:/app/media
       - ../dashboard_viewer:/app
-      - /app/node_modules
 
   dashboard:
     image: bmdsoftware/dashboard:5.0.3-RC
     build: *dashboard-build
     environment: *dashboard-environment
     ports:
-     - ${DASHBOARD_VIEWER_PORT}:8000
+      - ${DASHBOARD_VIEWER_PORT}:8000
     depends_on: *depends-on
     restart: unless-stopped
     volumes:
       - ../dashboard_viewer:/app
-      - /app/node_modules
       - dashboard_static:/app/static
 
 volumes:
