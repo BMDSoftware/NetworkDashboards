@@ -139,6 +139,7 @@ The concepts table is not in the repository due to its dimension, therefore we u
    ```sql
    CREATE INDEX concept_concept_id_index ON concept (concept_id);
    CREATE INDEX concept_concept_name_index ON concept (concept_name);
+   CREATE INDEX concept_concept_id_text ON concept ((concept_id::text));
    ```
 
 8. Set the owner of the `concept` table to the `achilles` user (value of the variable `POSTGRES_ACHILLES_USER` on the .env file):
