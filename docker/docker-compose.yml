@@ -66,7 +66,7 @@ version: "3.7"
 services:
   #### SUPERSET ####
   superset:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
     restart: unless-stopped
     environment: *superset-environment
@@ -77,7 +77,7 @@ services:
       - ${SUPERSET_PORT}:8088
 
   superset-init:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-init.sh"]
     environment: *superset-environment
     user: "root"
@@ -85,7 +85,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-bootstrap.sh", "worker"]
     restart: unless-stopped
     environment: *superset-environment
@@ -94,7 +94,7 @@ services:
     volumes: *superset-volumes
 
   superset-worker-beat:
-    image: bmdsoftware/superset:5.0.0
+    image: bmdsoftware/superset:5.0.2
     command: ["/app/docker/docker-bootstrap.sh", "beat"]
     restart: unless-stopped
     environment: *superset-environment
@@ -115,8 +115,8 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_ROOT_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD}
-      # Variables below are used to iniliaze databases for the
-      #  services below (superset and dashboard_viewer).
+      # Variables below are used to initialize databases for the
+      # services below (superset and dashboard_viewer).
       POSTGRES_DBS: ${POSTGRES_SUPERSET_DB} ${POSTGRES_DASHBOARD_VIEWER_DB} ${POSTGRES_ACHILLES_DB}
       POSTGRES_DBS_USERS: ${POSTGRES_SUPERSET_USER} ${POSTGRES_DASHBOARD_VIEWER_USER} ${POSTGRES_ACHILLES_USER}
       POSTGRES_DBS_PASSWORDS: ${POSTGRES_SUPERSET_PASSWORD} ${POSTGRES_DASHBOARD_VIEWER_PASSWORD} ${POSTGRES_ACHILLES_PASSWORD}
@@ -139,7 +139,7 @@ services:
       - dashboard
 
   dashboard_worker:
-    image: bmdsoftware/networkdashboards
+    image: bmdsoftware/dashboard:5.0.3-RC
     environment: *dashboard-environment
     command: /app/docker-entrypoint-worker.sh
     restart: unless-stopped
@@ -148,7 +148,7 @@ services:
       - ../dashboard_viewer/media:/app/media
 
   dashboard:
-    image: bmdsoftware/networkdashboards
+    image: bmdsoftware/dashboard:5.0.3-RC
     environment: *dashboard-environment
     depends_on: *depends-on
     restart: unless-stopped
