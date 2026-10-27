@@ -1,4 +1,3 @@
-import pandas
 from django.db import connections
 from uploader.models import (
     AchillesResults,
@@ -10,22 +9,20 @@ from uploader.models import (
 
 from .errors import translate
 
-
-def update_achilles_results_data(
+def update_achilles_results_from_df(
     logger,
     pending_upload: PendingUpload,
-    file_metadata,
+    valid_df,
     pandas_connection,
 ):
     data_source_id = pending_upload.data_source.id
+    ctx = {"ds": data_source_id, "upload": pending_upload.id}
 
     logger.info(
         "Moving old records to the AchillesResultsArchive table [datasource %d, pending upload %d]",
         data_source_id,
         pending_upload.id,
     )
-
-    ctx = {"ds": data_source_id, "upload": pending_upload.id}
 
     try:
         with connections["achilles"].cursor() as cursor:
@@ -35,34 +32,22 @@ def update_achilles_results_data(
     except Exception as exc:
         raise translate(exc, "archiving the previous data", logger, **ctx) from exc
 
-    reader = pandas.read_csv(
-        pending_upload.uploaded_file,
-        header=0,
-        dtype=file_metadata["types"],
-        skip_blank_lines=False,
-        index_col=False,
-        names=file_metadata["columns"],
-        chunksize=500,
-    )
-
     logger.info(
-        "Inserting new results records [datasource %d, pending upload %d]",
+        "Inserting new valid results records [datasource %d, pending upload %d]",
         data_source_id,
         pending_upload.id,
     )
 
     try:
-        for chunk in reader:
-            chunk = chunk[chunk["stratum_1"].isin(["0"]) == False].assign(data_source_id=data_source_id)
-            chunk.to_sql(
-                AchillesResults._meta.db_table,
-                pandas_connection,
-                if_exists="append",
-                index=False,
-            )
+        chunk = valid_df.assign(data_source_id=data_source_id)
+        chunk.to_sql(
+            AchillesResults._meta.db_table,
+            pandas_connection,
+            if_exists="append",
+            index=False,
+        )
     except Exception as exc:
         raise translate(exc, "saving your data", logger, **ctx) from exc
-
 
 def move_achilles_results_records(
     cursor, origin_model, destination_model, db_id, last_upload_id=None

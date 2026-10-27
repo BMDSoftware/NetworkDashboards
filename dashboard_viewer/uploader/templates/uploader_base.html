@@ -36,6 +36,8 @@
             {% block title %}{% endblock %}
 
             <form id="uploadForm" method="POST" enctype="multipart/form-data">
+                {% csrf_token %}
+
                 {% if constance_config.ALLOW_REPORTS_UPLOAD and report_forms %}
                     <div class="row">
                         {# Main Achilles Form #}

@@ -86,9 +86,9 @@ class InvalidFileFormat(UploadError):
 class InvalidFieldValue(UploadError):
     title = "Some values in the file aren't in the expected format"
     what_happened = (
-        "One or more cells contain a value that doesn't match the type expected "
-        "for that column. Only the stratum_* columns accept free text; every "
-        "other column must contain a number."
+    "One or more cells contain a value that doesn't match the format expected "
+    "for that field. Most non-stratum columns must contain numbers, and some "
+    "metadata fields must contain valid dates."
     )
     next_steps = (
         "Check the file wasn't opened and re-saved by a spreadsheet application, "
@@ -151,7 +151,7 @@ def translate(exc, stage, log, **context):
     error = (
         BLAME_TO_ERROR[blame](f"While {stage}, {reason}.")
         if blame
-        else InvalidCSVFile()  # no SQLSTATE and not a dead connection -> parsing error
+        else InvalidCSVFile()  
     )
     log.exception(
         "%s failed [sqlstate=%s blame=%s incident=%s] %s %s",
