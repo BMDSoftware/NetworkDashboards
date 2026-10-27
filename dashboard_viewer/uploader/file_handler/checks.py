@@ -366,6 +366,13 @@ def _load_staging_table_from_df(valid_df, data_source_id, log, ctx):
             chunk.to_sql("achilles_results_tmp", pandas_connection, if_exists="append", index=False)
             log.info("Staged %d rows %s", len(chunk), ctx)
 
+        with connections["achilles"].cursor() as cursor:
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tmp_analysis_stratum "
+                "ON achilles_results_tmp (analysis_id, stratum_1);"
+            )
+            cursor.execute("ANALYZE achilles_results_tmp;")
+
     except Exception as exc:
         raise translate(exc, "loading your data", log, **ctx) from exc
 

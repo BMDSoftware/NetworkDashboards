@@ -174,9 +174,15 @@ class PendingUpload(models.Model):
                 "record is an old one. If not please contact the system administrator for more details. "
             )
 
-        result = json.loads(task.result)
-        if result["exc_module"] in ("uploader.file_handler.errors",
-                                    "uploader.file_handler.checks"):
+        try:
+            result = json.loads(task.result)
+        except (json.JSONDecodeError, TypeError):
+            result = {}
+
+        if isinstance(result, dict) and result.get("exc_module") in (
+            "uploader.file_handler.errors",
+            "uploader.file_handler.checks",
+        ):
             message = result["exc_message"]
             if len(message) > 1 and isinstance(message[1], dict):
                 e = message[1]
