@@ -1,5 +1,6 @@
 """Classification of PostgreSQL errors by who can fix them."""
 import psycopg2
+from django.db import OperationalError as DjangoOperationalError, InterfaceError as DjangoInterfaceError
 
 USER = "user"
 TRANSIENT = "transient"
@@ -11,6 +12,10 @@ SQLSTATES = {
     "22P02": (USER,   "a value could not be read as the type it needs to be"),
     "22012": (USER,   "a calculation divided by zero"),
     "22007": (USER,   "a date could not be interpreted"),
+    "22008": (USER,   "a date could not be interpreted"),
+    "22005": (USER,   "a value could not be cast to the required type"),
+    "22000": (USER,   "a data processing error occurred"),
+    "22018": (USER,   "an invalid character value was provided for cast"),
     # Class 23 — integrity.
     "23502": (USER,   "a required value is missing"),
     "23505": (USER,   "the same record appears more than once"),
@@ -60,6 +65,10 @@ def classify(exc):
 def is_connection_lost(exc):
     if getattr(exc, "connection_invalidated", False):
         return True
+
+    if isinstance(exc, (DjangoOperationalError, DjangoInterfaceError)):
+        return True
+
     for err in (exc, getattr(exc, "orig", None), getattr(exc, "__cause__", None)):
         if isinstance(err, psycopg2.InterfaceError):
             return True
