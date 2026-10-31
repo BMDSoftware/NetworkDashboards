@@ -7,7 +7,7 @@ from django.core import serializers
 from django.core.cache import caches
 from django.db import connections
 from django.db import router, transaction
-from materialized_queries_manager.utils import refresh
+from materialized_queries_manager.tasks import request_refresh
 from redis_rw_lock import RWLock
 from django.utils import timezone
 
@@ -174,7 +174,7 @@ def upload_results_file(self, pending_upload_id: int):
     self.update_state(state='PROGRESS', meta={'percent': 85, 'step': 'Refreshing Dashboard Materialized Views...'})
 
     if not workers_updating:
-        refresh(logger, data_source.id)
+        request_refresh()
 
     total_end_time = timezone.now()
     refresh_duration = (total_end_time - ingestion_end_time).total_seconds()
@@ -232,4 +232,4 @@ def delete_datasource(objs):
         workers_updating = cache.decr("celery_workers_updating")
 
     if not workers_updating:
-        refresh(logger)
+        request_refresh()
