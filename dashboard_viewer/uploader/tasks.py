@@ -154,7 +154,7 @@ def upload_results_file(self, pending_upload_id: int):
             for alias in ("default", "achilles"):
                 try:# The connection might not be able to be reused to update the state of the pending upload,
                     # so we close it here
-                    # When pending upload updates its state afterwards, it will create a new connectio
+                    # When pending upload updates its state afterwards, it will create a new connection
                     connections[alias].close()
                 except Exception:
                     logger.info("Could not close connection %s", alias, exc_info=True)

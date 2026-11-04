@@ -249,6 +249,7 @@ def get_upload_task_status(_request, data_source, upload_id):
             id=upload_id, data_source=data_source_obj
         )
     except PendingUpload.DoesNotExist:
+        # assume if the objects doesn't exist it finished
         upload = get_object_or_404(
             UploadHistory, data_source=data_source_obj, pending_upload_id=upload_id
         )
@@ -354,7 +355,8 @@ def create_data_source(request, *_, **kwargs):
         if data_source is not None:
             initial["hash"] = data_source
 
-        if request.GET:  
+        if request.GET: # if the request has arguments
+            # compute fields' initial values
             _get_fields_initial_values(request, initial)
 
             aux_form = SourceForm(initial)
@@ -366,7 +368,8 @@ def create_data_source(request, *_, **kwargs):
                 obj.save()
 
                 return redirect(f"/uploader/{obj.hash}")
-
+                
+            # since the form isn't valid, lets maintain only the valid fields
             _leave_valid_fields_values_only(request, initial, aux_form)
 
             form = SourceForm(initial=initial)
@@ -498,6 +501,9 @@ def show_csv_report(request, data_source, report_type):
     return render(request, "report.html", context)
 
 class DataSourceUpdate(viewsets.GenericViewSet):
+    # since the edit and upload views don't have authentication, also disable
+    #  authentication from this
+    
     authentication_classes = ()
     permission_classes = ()
 
@@ -506,7 +512,8 @@ class DataSourceUpdate(viewsets.GenericViewSet):
     queryset = DataSource.objects.all()
 
     def get_object_for_patch(self):
-
+        # here we get the query set with select_for_update so it lock updates on that record
+        
         queryset = self.filter_queryset(self.get_queryset().select_for_update())
 
         assert (
@@ -516,6 +523,7 @@ class DataSourceUpdate(viewsets.GenericViewSet):
         filter_kwargs = {self.lookup_field: self.kwargs[self.lookup_field]}
         obj = get_object_or_404(queryset, **filter_kwargs)
 
+        # May raise a permission denied
         self.check_object_permissions(self.request, obj)
 
         return obj
@@ -530,7 +538,9 @@ class DataSourceUpdate(viewsets.GenericViewSet):
         request_refresh()
 
         if getattr(instance, "_prefetched_objects_cache", None):
-
+            # If 'prefetch_related' has been applied to a queryset, we need to
+            # forcibly invalidate the prefetch cache on the instance.
+            
             instance._prefetched_objects_cache = {}  # noqa
 
         return Response(serializer.data)
