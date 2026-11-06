@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import format_html, mark_safe
 from django.views.decorators.clickjacking import xframe_options_exempt
 from materialized_queries_manager.models import MaterializedQuery
-from materialized_queries_manager.tasks import refresh_materialized_views_task
+from materialized_queries_manager.tasks import request_refresh
 from rest_framework import viewsets
 from rest_framework.response import Response
 
@@ -384,9 +384,7 @@ class DataSourceUpdate(viewsets.GenericViewSet):
             serializer.is_valid(raise_exception=True)
             serializer.save()
 
-        refresh_materialized_views_task.delay(
-            [obj.matviewname for obj in MaterializedQuery.objects.all()],
-        )
+        request_refresh()
 
         if getattr(instance, "_prefetched_objects_cache", None):
             # If 'prefetch_related' has been applied to a queryset, we need to
