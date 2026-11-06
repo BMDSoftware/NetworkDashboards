@@ -1,4 +1,4 @@
-FROM python:3.9.18-bookworm
+FROM python:3.9.25-bookworm
 
 # Install Debian packages
 RUN apt-get update --allow-releaseinfo-change && \
