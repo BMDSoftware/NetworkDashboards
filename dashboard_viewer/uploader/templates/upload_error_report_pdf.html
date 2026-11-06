@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* Remove browser default headers/footers (URL, date, page numbers) */
+        @page {
+            size: auto;
+            margin: 0mm;
+        }
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            margin: 0;
+            padding: 20mm;
+            color: #1a1a1a;
+            background-color: #ffffff;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+
+        /* Action / Print Button */
+        .actions-bar {
+            margin-bottom: 25px;
+        }
+
+        .btn-print {
+            background-color: #0056b3;
+            color: #ffffff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-print:hover {
+            background-color: #003d80;
+        }
+
+        /* Clean Header */
+        .header {
+            border-bottom: 3px solid #0056b3;
+            padding-bottom: 15px;
+            margin-bottom: 25px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: #0056b3;
+            margin: 0 0 8px 0;
+        }
+
+        .header p {
+            margin: 0;
+            color: #555555;
+            font-size: 15px;
+        }
+
+        /* Simple Info Section */
+        .info-list {
+            background-color: #f4f6f8;
+            border-left: 4px solid #0056b3;
+            padding: 15px 20px;
+            margin-bottom: 30px;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .info-list p {
+            margin: 6px 0;
+            font-size: 15px;
+        }
+
+        .info-list strong {
+            color: #333333;
+        }
+
+        .warning-text {
+            color: #d9534f;
+            font-weight: bold;
+        }
+
+        /* Simple & Readable Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 15px;
+        }
+
+        th {
+            background-color: #e9ecef;
+            color: #212529;
+            text-align: left;
+            padding: 12px 15px;
+            font-size: 15px;
+            font-weight: bold;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        td {
+            padding: 14px 15px;
+            border-bottom: 1px solid #dee2e6;
+            vertical-align: top;
+        }
+
+        tbody tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        .line-number {
+            font-weight: bold;
+            color: #0056b3;
+        }
+
+        /* Print and PDF Optimizations */
+        @media print {
+            body {
+                padding: 15mm;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .info-list {
+                background-color: #ffffff;
+                border: 1px solid #ccc;
+                border-left: 4px solid #0056b3;
+            }
+            tr {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="actions-bar no-print">
+        <button onclick="window.print()" class="btn-print">
+            <i class="fas fa-print"></i> Save as PDF or Print
+        </button>
+    </div>
+
+    <div class="header">
+        <h1>File Error Report</h1>
+        <p>This document lists the rows in the uploaded file that contained invalid data and were excluded during processing.</p>
+    </div>
+
+    <div class="info-list">
+        <p><strong>Data Source:</strong> {{ data_source.name }} ({{ data_source.acronym }})</p>
+        <p><strong>Filename:</strong> {{ file_name }}</p>
+        <p><strong>Upload Date:</strong> {{ upload_record.upload_date|date:"Y-m-d \a\t H:i" }}</p>
+        <p><strong>Total Skipped Rows:</strong> <span class="warning-text">{{ errors|length }} row(s) skipped</span></p>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 15%;">File Row</th>
+                <th style="width: 25%;">Analysis ID</th>
+                <th style="width: 60%;">Reason / Error Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for error in errors %}
+            <tr>
+                <td class="line-number">Row {{ error.line }}</td>
+                <td>{{ error.analysis_id }}</td>
+                <td class="error-detail">{{ error.reason | escape }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="3" style="text-align: center; padding: 20px; color: #28a745; font-weight: bold;">
+                    <i class="fas fa-check-circle"></i> No errors found in this file.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</body>
+</html>

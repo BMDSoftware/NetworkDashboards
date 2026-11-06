@@ -1,6 +1,6 @@
 {% extends "uploader_base.html" %}
 
-{% block title %} {# data source info #}
+{% block title %}
     <div class="row">
         <h3 class="col">Data Source: {{ obj_data_source.name }}</h3>
         <div class="col-auto">
@@ -23,15 +23,13 @@
 
     <hr/>
 
-    {# Achilles resutls file form #}
     <h3>Upload new database characteristics</h3>
     <span>
         For more information see the CatalogueExport R-package
         <a href="https://github.com/EHDEN/CatalogueExport">
             <i class="fas fa-link"></i>
-        </a> {%if constance_config.ALLOW_REPORTS_UPLOAD %}<br> You can also upload an Onboarding Report, Analytical Benchmark or PeriNet Study {% endif %}
+        </a> {% if constance_config.ALLOW_REPORTS_UPLOAD %}<br> You can also upload an Onboarding Report, Analytical Benchmark or PeriNet Study {% endif %}
     </span>
-
 {% endblock %}
 
 {% block upload_history %}
@@ -66,43 +64,58 @@
                         <td>{% if up_hi.cdm_version %}{{ up_hi.cdm_version }}{% else %}--{% endif %}</td>
                         <td>{% if up_hi.vocabulary_version %}{{ up_hi.vocabulary_version }}{% else %}--{% endif %}</td>
                         <td
-                          {% if status == "Failed" %}
-                          data-failed="yes"
-                          data-failure-msg="{{ up_hi.failure_message }}"
-                          {% else %}
-                          data-failed="no"
-                          {% endif %}
-
-                          data-processing="{% if status != "Failed" and status != "Done" %}yes{% else %}no{% endif %}"
-
-                          {% if status != "Done" %}data-upload-id="{{ up_hi.id }}"{% endif %}
-
-                          {% if status == "Done" %}
-                            class="status-done"
-                          {% elif status == "Failed" %}
-                            class="status-failed"
-                          {% else %}
-                            class="status-processing"
-                          {% endif %}
-                          >{% spaceless %}
-
-                              {% if status == "Done" %}
-                                <i class="fas fa-check"></i>
-                              {% elif status == "Failed" %}
-                                <i class="fas fa-times"></i>
-                              {% else %}
-                                <i class="fas fa-spinner"></i>
-                              {% endif %}
-
-
-                              <span class="status-text">
-                                {{ status }}
-                              </span>
-
                             {% if status == "Failed" %}
-                              <a class="btn btn-danger failed-upload-msg"><i class="far fa-comment-alt"></i></a>
+                                data-failed="yes"
+                                data-failure-msg="{{ up_hi.failure_message }}"
+                            {% else %}
+                                data-failed="no"
                             {% endif %}
-                        {% endspaceless %}</td>
+
+                            data-processing="{% if status == 'Pending' or status == 'Started' %}yes{% else %}no{% endif %}"
+
+                            {% if status != "Done" and status != "Done with Warnings" %}data-upload-id="{{ up_hi.id }}"{% endif %}
+
+                            class="{% if status == 'Done' %}status-done{% elif status == 'Done with Warnings' %}status-warning{% elif status == 'Failed' %}status-failed{% else %}status-processing{% endif %}"
+                        >
+                            {% spaceless %}
+                                {% if status == "Pending" or status == "Started" %}
+                                    <div class="table-progress-box" id="table-progress-{{ up_hi.id }}">
+                                        <div class="progress table-progress-bar-container">
+                                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" 
+                                                id="table-bar-{{ up_hi.id }}" 
+                                                role="progressbar" 
+                                                style="width: 15%;">15%</div>
+                                        </div>
+                                        <div class="table-progress-subtext">
+                                            <i class="fas fa-spinner fa-spin mr-1"></i>
+                                            <span id="table-step-{{ up_hi.id }}">Initializing process...</span>
+                                        </div>
+                                    </div>
+                                {% elif status == "Done" %}
+                                    <i class="fas fa-check"></i>
+                                    <span class="status-text">Done</span>
+                                {% elif status == "Done with Warnings" %}
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <span class="status-text">Done with Warnings</span>
+                                    <a href="{% url 'download_upload_error_report' obj_data_source.hash up_hi.id %}" 
+                                    class="btn btn-warning btn-sm ml-1" 
+                                    title="View Error Report">
+                                        <i class="fas fa-download"></i> Log
+                                    </a>
+                                {% elif status == "Failed" %}
+                                    <i class="fas fa-times"></i>
+                                    <span class="status-text">Failed</span>
+                                    <a class="btn btn-danger btn-sm failed-upload-msg ml-1" 
+                                    tabindex="0"
+                                    role="button"
+                                    data-toggle="popover" 
+                                    data-trigger="hover focus" 
+                                    data-content="{% if up_hi.failure_message %}{{ up_hi.failure_message }}{% else %}No detailed failure message available.{% endif %}">
+                                        <i class="far fa-comment-alt"></i>
+                                    </a>
+                                {% endif %}
+                            {% endspaceless %}
+                        </td>
                     </tr>
                 {% endfor %}
                 </tbody>

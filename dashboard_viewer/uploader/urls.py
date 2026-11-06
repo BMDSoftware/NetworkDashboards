@@ -22,5 +22,11 @@ urlpatterns = [
         "<str:data_source>/report/<str:report_type>/",
         views.show_csv_report,
         name="show_csv_report"
+    ),
+    path(
+        "<str:data_source>/upload/<int:upload_history_id>/error-report/",
+        views.download_upload_error_report,
+        name="download_upload_error_report",
     )
+
 ]

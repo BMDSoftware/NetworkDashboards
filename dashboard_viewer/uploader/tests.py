@@ -11,7 +11,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings, tag, TestCase, TransactionTestCase
 from sqlalchemy import create_engine
 
-from .file_handler.checks import extract_data_from_uploaded_file
+from .file_handler.checks import extract_data_from_uploaded_file_tolerant
 from .file_handler.errors import (
     UploadError,
     DuplicatedMetadataRow,
@@ -20,7 +20,7 @@ from .file_handler.errors import (
     InvalidFileFormat,
     MissingFieldValue,
 )
-from .file_handler.updates import update_achilles_results_data
+from .file_handler.updates import update_achilles_results_from_df
 from .models import (
     AchillesResults,
     AchillesResultsArchive,
@@ -189,7 +189,7 @@ class UpdateAchillesResultsDataTestCase(TransactionTestCase):
 
     def _update_and_check(self, count, archive_count):
         self._pending_upload.uploaded_file.seek(0)
-        update_achilles_results_data(
+        update_achilles_results_from_df(
             self._logger,
             self._pending_upload,
             self.file_metadata,
@@ -209,7 +209,7 @@ class UpdateAchillesResultsDataTestCase(TransactionTestCase):
 
     def test_move_records_of_only_one_db(self):
         self._pending_upload.uploaded_file.seek(0)
-        update_achilles_results_data(
+        update_achilles_results_from_df(
             self._logger,
             self._pending_upload,
             self.file_metadata,
@@ -221,7 +221,7 @@ class UpdateAchillesResultsDataTestCase(TransactionTestCase):
 
         self._pending_upload.uploaded_file.seek(0)
         self._pending_upload.data_source = DataSource.objects.get(acronym="test2")
-        update_achilles_results_data(
+        update_achilles_results_from_df(
             self._logger,
             self._pending_upload,
             self.file_metadata,
@@ -253,7 +253,7 @@ class UpdateAchillesResultsDataTestCase(TransactionTestCase):
             uploaded_file=SimpleUploadedFile("dummy", new_file1.read()),
         )
 
-        update_achilles_results_data(
+        update_achilles_results_from_df(
             self._logger,
             new_pending_upload,
             self.file_metadata,
@@ -331,53 +331,53 @@ class ExtractDataFromUploadedFileTestCase(TestCase):
         self.file_7.seek(0)
 
         try:
-            extract_data_from_uploaded_file(self.file_7)
+            extract_data_from_uploaded_file_tolerant(self.file_7)
         except UploadError:
             self.fail("Exception raised")
 
     def test_all_good_16(self):
         try:
-            extract_data_from_uploaded_file(self.file_16)
+            extract_data_from_uploaded_file_tolerant(self.file_16)
         except UploadError:
             self.fail("Exception raised")
 
     def test_invalid_column_count(self):
         self.assertRaises(
             InvalidFileFormat,
-            extract_data_from_uploaded_file,
+            extract_data_from_uploaded_file_tolerant,
             self.file_7_invalid_column_count,
         )
 
     def test_invalid_types(self):
         self.assertRaises(
             InvalidFieldValue,
-            extract_data_from_uploaded_file,
+            extract_data_from_uploaded_file_tolerant,
             self.file_7_invalid_types,
         )
 
     def test_mandatory_empty(self):
         self.assertRaises(
             InvalidFieldValue,
-            extract_data_from_uploaded_file,
+            extract_data_from_uploaded_file_tolerant,
             self.file_7_mandatory_empty,
         )
 
     def test_missing_analysis_id_0(self):
         self.assertRaises(
-            MissingFieldValue, extract_data_from_uploaded_file, self.file_7_missing_0
+            MissingFieldValue, extract_data_from_uploaded_file_tolerant, self.file_7_missing_0
         )
 
     def test_duplicated_analysis_id_0(self):
         self.assertRaises(
             DuplicatedMetadataRow,
-            extract_data_from_uploaded_file,
+            extract_data_from_uploaded_file_tolerant,
             self.file_7_duplicated,
         )
 
     def test_return_value(self):
         self.file_7.seek(0)
 
-        file_metadata, metadata = extract_data_from_uploaded_file(self.file_7)
+        file_metadata, metadata = extract_data_from_uploaded_file_tolerant(self.file_7)
 
         self.assertEquals(
             metadata,
