@@ -1,6 +1,8 @@
 x-depends-on: &depends-on
-  - postgres
-  - redis
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_started
 
 x-superset-volumes: &superset-volumes
   - superset_home:/app/superset_home
@@ -112,6 +114,11 @@ services:
   postgres:
     image: postgres:10
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ROOT_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     environment:
       POSTGRES_USER: ${POSTGRES_ROOT_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD}

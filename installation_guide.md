@@ -127,7 +127,7 @@ The concepts table is not in the repository due to its dimension, therefore we u
 
 6. Copy the CSV file content to the table (this could take a while)
 
-   To get both `'` (single quotes) and `"` (double quotes) on the `concept_name` column we use a workaround by setting the quote character to one that should never be in the text. Here we used `\b` (backslash).
+   To get both `'` (single quotes) and `"` (double quotes) on the `concept_name` column we use a workaround by setting the quote character to one that should never be in the text. Here we used `\b` (backspace).
 
    ```sql
    COPY public.concept FROM '/tmp/concept.csv' WITH CSV HEADER
@@ -139,6 +139,11 @@ The concepts table is not in the repository due to its dimension, therefore we u
    ```sql
    CREATE INDEX concept_concept_id_index ON concept (concept_id);
    CREATE INDEX concept_concept_name_index ON concept (concept_name);
+   ```
+
+   **Optional:** Improves performance for materialised views or Superset queries casting concept_id to text:
+
+   ```sql
    CREATE INDEX concept_concept_id_text ON concept ((concept_id::text));
    ```
 
@@ -147,9 +152,9 @@ The concepts table is not in the repository due to its dimension, therefore we u
    ```sql
    ALTER TABLE concept OWNER TO achilles;
    ```
-   
+
 9. Exit psql (`\q`) and the container shell (`exit`).
-   
+
 ### Step 5: Post-Setup & Asset compilation
 
 In development mode, ensure node modules are present in the mounted local directory before collecting static assets:
@@ -203,5 +208,4 @@ docker-compose -f docker-compose-dev.yml stop
 
 # Restart a specific service (useful after updating config files)
 docker-compose -f docker-compose-dev.yml restart dashboard
-docker-compose -f docker-compose-dev.yml restart nginx
 ```
