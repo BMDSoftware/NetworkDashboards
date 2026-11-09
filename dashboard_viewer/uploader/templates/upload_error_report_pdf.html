@@ -140,14 +140,20 @@
     </style>
 </head>
 <body>
+    {% if not embedded %}
     <div class="actions-bar no-print">
         <button onclick="window.print()" class="btn-print">
             <i class="fas fa-print"></i> Save as PDF or Print
         </button>
     </div>
 
+    {% endif %}
+
     <div class="header">
-        <h1>File Error Report</h1>
+        <h1 id="upload-error-report-heading">File Error Report</h1>
+        {% if failed_upload %}
+        <p>No valid rows were imported. Existing results were kept.</p>
+        {% endif %}
         <p>This document lists the rows in the uploaded file that contained invalid data and were excluded during processing.</p>
     </div>
 
@@ -155,7 +161,7 @@
         <p><strong>Data Source:</strong> {{ data_source.name }} ({{ data_source.acronym }})</p>
         <p><strong>Filename:</strong> {{ file_name }}</p>
         <p><strong>Upload Date:</strong> {{ upload_record.upload_date|date:"Y-m-d \a\t H:i" }}</p>
-        <p><strong>Total Skipped Rows:</strong> <span class="warning-text">{{ errors|length }} row(s) skipped</span></p>
+        <p><strong>Validation Errors:</strong> <span class="warning-text">{{ errors|length }}</span></p>
     </div>
 
     <table>

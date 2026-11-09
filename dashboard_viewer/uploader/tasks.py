@@ -2,7 +2,6 @@ import os
 
 from celery import shared_task
 from celery.utils.log import get_task_logger
-from django.conf import settings
 from django.core import serializers
 from django.core.cache import caches
 from django.db import connections
@@ -18,7 +17,7 @@ from .file_handler.checks import (
     validate_data_in_existing_mat_views_df,
     sort_errors_by_line,
 )
-from .file_handler.errors import TemporaryFailure
+from .file_handler.errors import FileDataCorrupted, NoValidRows, TemporaryFailure
 from .file_handler.postgres_errors import is_connection_lost
 from .file_handler.updates import update_achilles_results_from_df
 from .models import AchillesResults, PendingUpload, UploadHistory
@@ -26,21 +25,59 @@ from .models import AchillesResults, PendingUpload, UploadHistory
 logger = get_task_logger(__name__)
 
 
+def _update_upload_progress(task, percent, step):
+    try:
+        task.update_state(state="PROGRESS", meta={"percent": percent, "step": step})
+    except Exception:
+        logger.warning("Could not update upload progress to %d%%", percent, exc_info=True)
+
+
+def _finish_persisted_upload(task, pending_upload):
+    try:
+        _update_upload_progress(task, 85, "Refreshing Dashboard Materialized Views...")
+        failed_views = refresh(logger, pending_upload.data_source_id)
+        if failed_views:
+            raise RuntimeError(f"Materialized views failed to refresh: {', '.join(failed_views)}")
+        pending_upload.delete()
+    except Exception:
+        PendingUpload.objects.filter(pk=pending_upload.pk).update(
+            status=PendingUpload.STATE_FAILED
+        )
+        raise
+
+
 @shared_task(bind=True)
 def upload_results_file(self, pending_upload_id: int):
     start_time = timezone.now()
 
-    pending_upload = PendingUpload.objects.get(id=pending_upload_id)
-    pending_upload.status = PendingUpload.STATE_STARTED
-    pending_upload.save()
+    pending = PendingUpload.objects.filter(id=pending_upload_id)
+    pending_upload = pending.first()
+    if pending_upload is None:
+        return
 
-    self.update_state(state='PROGRESS', meta={'percent': 20, 'step': 'Parsing CSV & Metadata...'})
+    if UploadHistory.objects.filter(
+        data_source_id=pending_upload.data_source_id,
+        pending_upload_id=pending_upload_id,
+    ).exists():
+        pending.update(status=PendingUpload.STATE_STARTED)
+        _finish_persisted_upload(self, pending_upload)
+        return
+
+    if not pending.filter(
+        status__in=(PendingUpload.STATE_PENDING, PendingUpload.STATE_STARTED)
+    ).update(status=PendingUpload.STATE_STARTED):
+        # The web request may have cancelled a task whose publication was uncertain.
+        return
 
     data_source = pending_upload.data_source
 
     logger.info("Started to process file [datasource %d, pending upload %d]", data_source.id, pending_upload_id)
 
+    valid_df = None
+    failure_row_errors = []
     try:
+        _update_upload_progress(self, 20, "Parsing CSV & Metadata...")
+
         # To prevent the database owner from uploading the same data to the datasource
 
         logger.info(
@@ -67,22 +104,33 @@ def upload_results_file(self, pending_upload_id: int):
             pending_upload_id,
         )
 
-        self.update_state(state='PROGRESS', meta={'percent': 40, 'step': 'Simulating Materialized Views...'})
+        _update_upload_progress(self, 40, "Simulating Materialized Views...")
 
         view_errors = validate_data_in_existing_mat_views_df(
             data_source.id, valid_df, pending_upload
         )
 
         all_errors = sort_errors_by_line(parsing_errors + view_errors)
+        if valid_df.empty:
+            failure_row_errors = all_errors
+            raise NoValidRows()
+
+        if any(error["line"] == "N/A" for error in view_errors):
+            failure_row_errors = all_errors
+            raise FileDataCorrupted(
+                "The dashboard queries could not be validated with the remaining rows. "
+                "No rows were imported. Existing results were kept.",
+                details=("Open the Log to see which queries failed validation.",),
+            )
+
         has_warnings = len(all_errors) > 0
 
         cache = caches["workers_locks"]
 
-        self.update_state(state='PROGRESS', meta={'percent': 70, 'step': 'Persisting Valid Records...'})
+        _update_upload_progress(self, 70, "Persisting Valid Records...")
 
+        cache.incr("celery_workers_updating", ignore_key_check=True)
         try:
-            cache.incr("celery_workers_updating", ignore_key_check=True)
-
             with RWLock(# several workers can update their records in parallel -> same as -> several threads can read from the same file
                 cache.client.get_client(),
                 "celery_worker_updating",
@@ -92,7 +140,13 @@ def upload_results_file(self, pending_upload_id: int):
                 f"celery_worker_lock_db_{data_source.id}"
             ), transaction.atomic(
                 using=router.db_for_write(AchillesResults)
-            ), settings.ACHILLES_DB_SQLALCHEMY_ENGINE.connect() as pandas_connection, pandas_connection.begin():
+            ):
+                # A second delivery of this task may have finished ingestion while we waited.
+                if UploadHistory.objects.filter(
+                    data_source_id=data_source.id,
+                    pending_upload_id=pending_upload_id,
+                ).exists():
+                    return
 
                 logger.info(
                     "Updating results data [datasource %d, pending upload %d]",
@@ -104,7 +158,6 @@ def upload_results_file(self, pending_upload_id: int):
                     logger,
                     pending_upload,
                     valid_df,
-                    pandas_connection,
                 )
 
                 logger.info(
@@ -130,10 +183,22 @@ def upload_results_file(self, pending_upload_id: int):
 
                 file_hash = _calculate_sha256(pending_upload.uploaded_file.path) if os.path.exists(pending_upload.uploaded_file.path) else None
 
-                logger.info(
-                    "Deleting pending upload [datasource %d, pending upload %d]",
-                    data_source.id,
-                    pending_upload_id,
+                # The archive, new results and history use the same Achilles transaction.
+                UploadHistory.objects.create(
+                    data_source=data_source,
+                    r_package_version=data["r_package_version"],
+                    generation_date=data["generation_date"],
+                    cdm_release_date=data["cdm_release_date"],
+                    cdm_version=data["cdm_version"],
+                    vocabulary_version=data["vocabulary_version"],
+                    uploaded_file=pending_upload.uploaded_file,
+                    pending_upload_id=pending_upload.id,
+                    errors_summary={
+                        "original_filename": original_filename,
+                        "file_hash": file_hash,
+                        "errors": all_errors,
+                    },
+                    has_warnings=has_warnings,
                 )
 
                 logger.debug(
@@ -145,10 +210,10 @@ def upload_results_file(self, pending_upload_id: int):
                 )
 
         finally:
-            workers_updating = cache.decr("celery_workers_updating")
+            cache.decr("celery_workers_updating")
 
     except Exception as e:
-        logger.info("Upload failed [datasource %d, upload %d]", data_source.id, pending_upload_id)
+        logger.info("Upload task interrupted [datasource %d, upload %d]", data_source.id, pending_upload_id)
 
         if is_connection_lost(e) or isinstance(e, TemporaryFailure):
             for alias in ("default", "achilles"):
@@ -161,20 +226,18 @@ def upload_results_file(self, pending_upload_id: int):
                     pass
 
         PendingUpload.objects.filter(id=pending_upload_id).update(
-            status=PendingUpload.STATE_FAILED
+            status=PendingUpload.STATE_FAILED, row_errors=failure_row_errors
         )
-        raise e
+        raise
 
-    # The lines below can be used to later update materialized views of each chart
-    # To be more efficient, they should only be updated when the is no more workers inserting records
+    finally:
+        if valid_df is not None:
+            valid_df.close()
 
     ingestion_end_time = timezone.now()
     ingestion_duration = (ingestion_end_time - start_time).total_seconds()
 
-    self.update_state(state='PROGRESS', meta={'percent': 85, 'step': 'Refreshing Dashboard Materialized Views...'})
-
-    if not workers_updating:
-        refresh(logger, data_source.id)
+    _finish_persisted_upload(self, pending_upload)
 
     total_end_time = timezone.now()
     refresh_duration = (total_end_time - ingestion_end_time).total_seconds()
@@ -189,25 +252,6 @@ def upload_results_file(self, pending_upload_id: int):
         total_duration
     )
 
-    with transaction.atomic(using=router.db_for_write(UploadHistory)):
-        UploadHistory.objects.create(
-            data_source=data_source,
-            r_package_version=data["r_package_version"],
-            generation_date=data["generation_date"],
-            cdm_release_date=data["cdm_release_date"],
-            cdm_version=data["cdm_version"],
-            vocabulary_version=data["vocabulary_version"],
-            uploaded_file=pending_upload.uploaded_file,
-            pending_upload_id=pending_upload.id,
-            errors_summary={
-                "original_filename": original_filename,
-                "file_hash": file_hash, 
-                "errors": all_errors,
-            },
-            has_warnings=has_warnings,
-        )
-
-    pending_upload.delete()
 
 @shared_task
 def delete_datasource(objs):

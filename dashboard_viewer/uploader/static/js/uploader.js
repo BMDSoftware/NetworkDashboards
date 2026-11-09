@@ -43,6 +43,31 @@ $(document).ready(function () {
         }
     });
 
+    var reportFrame = $('#uploadErrorReportFrame');
+    var printReport = $('#printUploadErrorReport');
+
+    reportFrame.on('load', function () {
+        var report = this.contentDocument;
+        printReport.prop('disabled', !report || !report.getElementById('upload-error-report-heading'));
+    });
+
+    printReport.on('click', function () {
+        reportFrame[0].contentWindow.print();
+    });
+
+    $('.upload-error-log').on('click', function (event) {
+        event.preventDefault();
+        var url = new URL(this.href);
+        url.searchParams.set('embedded', '1');
+        printReport.prop('disabled', true);
+        reportFrame.attr('src', url.href);
+        $('#uploadErrorReportModal').modal('show');
+    });
+    $('#uploadErrorReportModal').on('hidden.bs.modal', function () {
+        printReport.prop('disabled', true);
+        reportFrame.attr('src', 'about:blank');
+    });
+
     initTableProgressPolling();
 });
 
@@ -85,7 +110,7 @@ function initTableProgressPolling() {
                         sessionStorage.setItem('progress_step_' + uploadId, data.step_message);
                     }
 
-                    const isFailed = data.failed || (data.status && data.status.toLowerCase() === 'failed');
+                    const isFailed = data.status === 'Failed' || data.status === 'Finalization failed';
 
                     if (data.completed || isFailed) {
                         clearInterval(interval);
@@ -94,11 +119,12 @@ function initTableProgressPolling() {
                         sessionStorage.removeItem('progress_step_' + uploadId);
 
                         if (progressBar.length > 0) {
-                            progressBar.css('width', '100%').text('100%');
+                            const finalPercent = isFailed ? data.percent : 100;
+                            progressBar.css('width', finalPercent + '%').text(finalPercent + '%');
                             
                             if (isFailed) {
                                 progressBar.removeClass('bg-info bg-success bg-warning').addClass('bg-danger');
-                                if (stepText.length > 0) stepText.text('Upload failed!');
+                                if (stepText.length > 0) stepText.text(data.step_message || 'Upload failed!');
                             } else if (data.has_warnings) {
                                 progressBar.removeClass('bg-info bg-danger bg-success').addClass('bg-warning');
                                 if (stepText.length > 0) stepText.text('Completed with warnings.');

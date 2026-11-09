@@ -8,12 +8,12 @@ from uploader.models import (
 )
 
 from .errors import translate
+from .checks import iter_data_chunks
 
 def update_achilles_results_from_df(
     logger,
     pending_upload: PendingUpload,
     valid_df,
-    pandas_connection,
 ):
     data_source_id = pending_upload.data_source.id
     ctx = {"ds": data_source_id, "upload": pending_upload.id}
@@ -39,13 +39,11 @@ def update_achilles_results_from_df(
     )
 
     try:
-        chunk = valid_df.assign(data_source_id=data_source_id)
-        chunk.to_sql(
-            AchillesResults._meta.db_table,
-            pandas_connection,
-            if_exists="append",
-            index=False,
-        )
+        for frame in iter_data_chunks(valid_df):
+            records = frame.astype(object).where(frame.notna(), None).to_dict("records")
+            AchillesResults.objects.bulk_create(
+                [AchillesResults(data_source_id=data_source_id, **record) for record in records]
+            )
     except Exception as exc:
         raise translate(exc, "saving your data", logger, **ctx) from exc
 

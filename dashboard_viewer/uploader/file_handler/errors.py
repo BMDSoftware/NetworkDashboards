@@ -140,6 +140,14 @@ BLAME_TO_ERROR = {
     TRANSIENT: TemporaryFailure,
 }
 
+class NoValidRows(UploadError):
+    title = "No valid rows were found in the file"
+    what_happened = "No rows were imported. Existing results were kept."
+    next_steps = (
+        "Open the Log to see which rows were rejected and why.",
+        "Correct the errors in the source data and upload a new export.",
+    )
+
 def translate(exc, stage, log, **context):
     """
     Map a raw exception to a user-facing one, logging the full detail first.

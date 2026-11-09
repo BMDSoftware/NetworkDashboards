@@ -64,7 +64,7 @@
                         <td>{% if up_hi.cdm_version %}{{ up_hi.cdm_version }}{% else %}--{% endif %}</td>
                         <td>{% if up_hi.vocabulary_version %}{{ up_hi.vocabulary_version }}{% else %}--{% endif %}</td>
                         <td
-                            {% if status == "Failed" %}
+                            {% if status == "Failed" or status == "Finalization failed" %}
                                 data-failed="yes"
                                 data-failure-msg="{{ up_hi.failure_message }}"
                             {% else %}
@@ -75,7 +75,7 @@
 
                             {% if status != "Done" and status != "Done with Warnings" %}data-upload-id="{{ up_hi.id }}"{% endif %}
 
-                            class="{% if status == 'Done' %}status-done{% elif status == 'Done with Warnings' %}status-warning{% elif status == 'Failed' %}status-failed{% else %}status-processing{% endif %}"
+                            class="{% if status == 'Done' %}status-done{% elif status == 'Done with Warnings' %}status-warning{% elif status == 'Failed' or status == 'Finalization failed' %}status-failed{% else %}status-processing{% endif %}"
                         >
                             {% spaceless %}
                                 {% if status == "Pending" or status == "Started" %}
@@ -98,13 +98,13 @@
                                     <i class="fas fa-exclamation-triangle"></i>
                                     <span class="status-text">Done with Warnings</span>
                                     <a href="{% url 'download_upload_error_report' obj_data_source.hash up_hi.id %}" 
-                                    class="btn btn-warning btn-sm ml-1" 
+                                    class="btn btn-warning btn-sm ml-1 upload-error-log"
                                     title="View Error Report">
                                         <i class="fas fa-download"></i> Log
                                     </a>
-                                {% elif status == "Failed" %}
+                                {% elif status == "Failed" or status == "Finalization failed" %}
                                     <i class="fas fa-times"></i>
-                                    <span class="status-text">Failed</span>
+                                    <span class="status-text">{{ status }}</span>
                                     <a class="btn btn-danger btn-sm failed-upload-msg ml-1" 
                                     tabindex="0"
                                     role="button"
@@ -113,6 +113,13 @@
                                     data-content="{% if up_hi.failure_message %}{{ up_hi.failure_message }}{% else %}No detailed failure message available.{% endif %}">
                                         <i class="far fa-comment-alt"></i>
                                     </a>
+                                    {% if up_hi.row_errors %}
+                                        <a href="{% url 'download_failed_upload_error_report' obj_data_source.hash up_hi.id %}"
+                                           class="btn btn-warning btn-sm ml-1 upload-error-log"
+                                           title="View Error Report">
+                                            <i class="fas fa-download" aria-hidden="true"></i> Log
+                                        </a>
+                                    {% endif %}
                                 {% endif %}
                             {% endspaceless %}
                         </td>
@@ -123,5 +130,24 @@
         {% else %}
             <p>No results files were uploaded.</p>
         {% endif %}
+    </div>
+    <div class="modal fade" id="uploadErrorReportModal" tabindex="-1" role="dialog"
+         aria-label="File Error Report" aria-hidden="true">
+        <div class="modal-dialog modal-xl" role="document">
+            <div class="modal-content upload-error-report-content">
+                <div class="modal-header">
+                    <button type="button" id="printUploadErrorReport" class="btn btn-primary btn-sm" disabled>
+                        <i class="fas fa-print" aria-hidden="true"></i> Save as PDF or Print
+                    </button>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body p-0">
+                    <iframe id="uploadErrorReportFrame" title="Upload error report"
+                            class="upload-error-report-frame" src="about:blank"></iframe>
+                </div>
+            </div>
+        </div>
     </div>
 {% endblock %}

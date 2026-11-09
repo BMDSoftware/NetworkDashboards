@@ -4,6 +4,9 @@ import io
 import logging
 import os
 import re
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import numpy
 import pandas
 
@@ -28,6 +31,67 @@ from .errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ValidatedRows:
+    """Keep converted CSV chunks on disk, preserving their original row indices.
+
+    Pickles are written and read only within this private temporary directory;
+    uploaded files are never unpickled.
+    """
+
+    def __init__(self):
+        self._directory = TemporaryDirectory(prefix="achilles-valid-")
+        self._chunk_count = 0
+        self._row_count = 0
+
+    def _path(self, number):
+        return Path(self._directory.name) / f"{number}.pkl"
+
+    def append(self, chunk):
+        if not chunk.empty:
+            chunk.to_pickle(self._path(self._chunk_count))
+            self._chunk_count += 1
+            self._row_count += len(chunk)
+
+    def __len__(self):
+        return self._row_count
+
+    @property
+    def empty(self):
+        return self._row_count == 0
+
+    def iter_chunks(self):
+        for number in range(self._chunk_count):
+            chunk = pandas.read_pickle(self._path(number))
+            if not chunk.empty:
+                yield chunk
+
+    def iterrows(self):
+        for chunk in self.iter_chunks():
+            yield from chunk.iterrows()
+
+    def drop(self, *, index, inplace):
+        if not inplace:
+            raise ValueError("ValidatedRows only supports in-place removal")
+        indices = set(index)
+        for number in range(self._chunk_count):
+            chunk = pandas.read_pickle(self._path(number))
+            remaining = chunk.drop(index=chunk.index.intersection(indices))
+            if len(remaining) != len(chunk):
+                remaining.to_pickle(self._path(number))
+                self._row_count -= len(chunk) - len(remaining)
+
+    def close(self):
+        self._directory.cleanup()
+
+
+def iter_data_chunks(data):
+    """Also accept a DataFrame for callers that already have a small dataset."""
+    if isinstance(data, ValidatedRows):
+        yield from data.iter_chunks()
+    elif not data.empty:
+        yield data
 
 
 def sort_errors_by_line(errors):
@@ -268,9 +332,6 @@ def _get_mat_view_queries():
         tmp_definition = mat_view.to_dict()["definition"].replace(
             "achilles_results", "achilles_results_tmp"
         )
-        
-        tmp_definition = re.sub(r'NULLIF\((.+?),\s*0\)', r'\1', tmp_definition, flags=re.IGNORECASE)
-
         mat_views[tmp_mat_view_name] = [
             tmp_definition,
         ]
@@ -319,18 +380,35 @@ def validate_data_in_existing_mat_views_df(data_source_id, valid_df, pending_upl
             if mat_views and not valid_df.empty:
                 _load_staging_table_from_df(valid_df, data_source_id, logger, ctx)
                 probe_errors, lines_to_drop = _probe_charts(mat_views, valid_df, logger, ctx)
+                if lines_to_drop:
+                    # Check the exact remaining rows, using the original view definitions.
+                    with connections["achilles"].cursor() as cursor:
+                        cursor.execute(
+                            "DELETE FROM achilles_results_tmp WHERE source_line = ANY(%s)",
+                            (list(lines_to_drop),),
+                        )
+                        probe_errors = {
+                            key: value for key, value in probe_errors.items() if key[0] != "N/A"
+                        }
+                        for name, definitions in mat_views.items():
+                            for definition in definitions:
+                                try:
+                                    _check_staged_view(cursor, name, definition)
+                                except Exception as exc:
+                                    state = _validation_data_sqlstate(exc, name, logger, ctx)
+                                    reason = _describe(state, exc)
+                                    probe_errors[("N/A", f"{reason} (view {name.removesuffix('_tmp')})")] = (
+                                        "N/A", _detail(exc)
+                                    )
+                    valid_df.drop(index=[ln - 2 for ln in lines_to_drop], inplace=True)
+                    logger.info("Removed %d row(s) that break materialized views %s", len(lines_to_drop), ctx)
+
                 for (line_num, description), (analysis_id_val, detail) in probe_errors.items():
                     mat_view_errors.append({
                         "line": line_num,
                         "analysis_id": str(analysis_id_val),
                         "reason": f"{description}: {detail}" if detail else description,
                     })
-                # the lines that break the views are skipped: if they were inserted,
-                # the refresh of the views would fail after the upload.
-                drop = [ln - 2 for ln in lines_to_drop if (ln - 2) in valid_df.index]
-                if drop:
-                    valid_df.drop(index=drop, inplace=True)
-                    logger.info("Removed %d row(s) that break materialized views %s", len(drop), ctx)
 
             mat_view_errors = sort_errors_by_line(mat_view_errors)
 
@@ -359,12 +437,13 @@ def _load_staging_table_from_df(valid_df, data_source_id, log, ctx):
             cursor.execute("ALTER TABLE achilles_results_tmp ALTER COLUMN id SET NOT NULL")
             cursor.execute("ALTER TABLE achilles_results_tmp ADD COLUMN source_line integer")
 
-            chunk = valid_df.assign(
-                data_source_id=data_source_id,
-                source_line=lambda d: d.index.to_numpy() + 2,
-            )
-            chunk.to_sql("achilles_results_tmp", pandas_connection, if_exists="append", index=False)
-            log.info("Staged %d rows %s", len(chunk), ctx)
+            for frame in iter_data_chunks(valid_df):
+                chunk = frame.assign(
+                    data_source_id=data_source_id,
+                    source_line=lambda d: d.index.to_numpy() + 2,
+                )
+                chunk.to_sql("achilles_results_tmp", pandas_connection, if_exists="append", index=False)
+            log.info("Staged %d rows %s", len(valid_df), ctx)
 
         with connections["achilles"].cursor() as cursor:
             cursor.execute(
@@ -413,20 +492,18 @@ def _detail(exc):
     return msg[:200]
 
 
-def _probe_error(cursor, definition, where, view_sqlstate):
-    """None if the query passes; otherwise (sqlstate, description, detail) of the error that this query produced."""
+def _probe_error(cursor, definition, where, view, log, ctx):
+    """Return a data error, or None only when the probe succeeds."""
     try:
         _run_probe(cursor, definition, where)
-        return None
     except Exception as exc:
-        st = pg_sqlstate(exc)
-        if st and (st == view_sqlstate or st.startswith("22")):
-            return st, _describe(st, exc), _detail(exc)
-        return None
+        state = _validation_data_sqlstate(exc, view, log, ctx)
+        return state, _describe(state, exc), _detail(exc)
+    return None
 
 
-def _locate(cursor, definition, analysis_id, lines, err, view_sqlstate):
-    """Binary search (errors from a single line). Returns [(line, error)], each line with its own error."""
+def _locate(probe, analysis_id, lines, err):
+    """Binary search for errors that can be reproduced on a single line."""
     if len(lines) == 1:
         return [(lines[0], err)]
     mid = len(lines) // 2
@@ -434,66 +511,63 @@ def _locate(cursor, definition, analysis_id, lines, err, view_sqlstate):
     for half in (lines[:mid], lines[mid:]):
         where = (f"analysis_id = {analysis_id} AND "
                  f"source_line IN ({','.join(str(n) for n in half)})")
-        half_err = _probe_error(cursor, definition, where, view_sqlstate)
+        half_err = probe(where)
         if half_err:
-            found += _locate(cursor, definition, analysis_id, half, half_err, view_sqlstate)
+            found += _locate(probe, analysis_id, half, half_err)
     return found
 
 
-def _fails_without(cursor, definition, removed, view_sqlstate):
-    """True if the view continues to fail after removing the lines `removed` from the staging table."""
-    where = f"source_line NOT IN ({','.join(str(n) for n in removed)})" if removed else "TRUE"
-    return _probe_error(cursor, definition, where, view_sqlstate) is not None
+def _fails_without(probe, removed):
+    where = f"source_line NOT IN ({','.join(str(n) for n in sorted(removed))})" if removed else "TRUE"
+    return probe(where) is not None
 
 
-def _necessary(cursor, definition, lines, already_removed, view_sqlstate):
-    """Lines without which the error disappears (binary search by removal)."""
-    if len(lines) == 1:
-        return list(lines)
-    mid = len(lines) // 2
-    found = []
-    for half in (lines[:mid], lines[mid:]):
-        if not _fails_without(cursor, definition, already_removed + half, view_sqlstate):
-            found += _necessary(cursor, definition, half, already_removed, view_sqlstate)
-    return found
+def _locate_context(probe, counts, max_probes=40):
+    """Find a set of zero rows whose removal fixes the division, without editing staging."""
+    zeros = sorted(line for line, count in counts.items() if count == 0)
+    excluded = set(zeros)
+    if not excluded or _fails_without(probe, excluded):
+        return []
+
+    # Try keeping groups of candidate rows, then split groups we could not keep.
+    # This detects independent failures that mask one another when removed individually.
+    groups = [zeros]
+    probes = 1
+    while groups:
+        group = groups.pop()
+        remaining = excluded.difference(group)
+        if remaining:
+            if probes >= max_probes:
+                return []
+            probes += 1
+            if not _fails_without(probe, remaining):
+                excluded = remaining
+                continue
+        if len(group) > 1:
+            mid = len(group) // 2
+            groups.extend((group[:mid], group[mid:]))
+    return sorted(excluded)
 
 
-def _locate_context(cursor, definition, lines_by_analysis, counts, gone, view_sqlstate, max_rounds=20):
-    """
-    Contextual errors (division by zero): looks for the lines without which the error disappears.
-    A divisor is a count of zero, so among the necessary lines, the ones that have
-    count_value = 0 (the others are just the numerator).
-    After finding a divisor, it corrects it in the staging table (count_value = 1) and repeats,
-    because one error can hide another (e.g., two counts of zero in different analyses).
-    Removing the line is not sufficient: it would empty the joins and hide the second error.
-    The staging is temporary; what is inserted comes from valid_df, which is not modified here.
-    """
-    found = []
-    for _ in range(max_rounds):
-        if not _fails_without(cursor, definition, [], view_sqlstate):
-            break
-        involved = []
-        for lines in lines_by_analysis.values():
-            remaining = [ln for ln in lines if ln not in gone]
-            if remaining and not _fails_without(cursor, definition, remaining, view_sqlstate):
-                involved += _necessary(cursor, definition, remaining, [], view_sqlstate)
-        zeros = [ln for ln in involved if counts.get(ln) == 0]
-        meta_lines = set(lines_by_analysis.get(0, [])) | set(lines_by_analysis.get(5000, []))
-        others = [ln for ln in involved if ln not in meta_lines]
-        culprits = zeros or others or involved
+def _validation_data_sqlstate(exc, view, log, ctx):
+    state = pg_sqlstate(exc)
+    if state and state[:2] in ("22", "23"):
+        return state
 
-        if not culprits:
-            break
-        ids = ",".join(str(n) for n in culprits)
-        if zeros:
-            cursor.execute(f"UPDATE achilles_results_tmp SET count_value = 1 WHERE source_line IN ({ids})")
-            for ln in zeros:
-                counts[ln] = 1
-        else:
-            cursor.execute(f"DELETE FROM achilles_results_tmp WHERE source_line IN ({ids})")
-            gone.update(culprits)
-        found += culprits
-    return found
+    error = TemporaryFailure(
+        "The dashboard queries could not be checked. No rows were imported. "
+        "Existing results were kept."
+    )
+    log.exception(
+        "Could not validate view %s [sqlstate=%s incident=%s] %s",
+        view, state, error.incident_id, ctx,
+    )
+    raise error from exc
+
+
+def _check_staged_view(cursor, name, definition):
+    cursor.execute(f"CREATE MATERIALIZED VIEW {name} AS {definition}")
+    cursor.execute(f"DROP MATERIALIZED VIEW {name}")
 
 
 def _probe_charts(mat_views, valid_df, log, ctx):
@@ -501,14 +575,12 @@ def _probe_charts(mat_views, valid_df, log, ctx):
     Called only to locate where the problem is: the view has already failed on the staging table.
       - Single-line errors (casts, to_date): tests by analysis_id and locates by binary search.
       - Contextual errors (division by zero): looks for the lines without which the error disappears.
-      - If the view fails and no line can be located, the error is reported
-        (line "N/A"), to never be lost in silence.
+      - If the view fails and no line can be located, mark it as unresolved (line "N/A").
     The view name does not enter the key: the same error on the same line in several views appears once.
     Returns ({(line, description): (analysis_id, detail)}, {lines to skip}).
     """
     errors = {}
     lines_to_drop = set()
-    gone = set() 
 
     lines_by_analysis, analysis_of, counts = {}, {}, {}
     for idx, row in valid_df.iterrows():
@@ -530,47 +602,37 @@ def _probe_charts(mat_views, valid_df, log, ctx):
             view = name[:-4] if name.endswith("_tmp") else name
             for definition in definitions:
                 try:
-                    cursor.execute(f"CREATE MATERIALIZED VIEW {name} AS {definition}")
-                    cursor.execute(f"DROP MATERIALIZED VIEW {name}")
+                    _check_staged_view(cursor, name, definition)
                     continue
                 except Exception as exc:
-                    if not isinstance(exc, TemporaryFailure):
-                        try:
-                            cursor.execute(f"DROP MATERIALIZED VIEW IF EXISTS {name}")
-                        except Exception:
-                            log.warning("Could not drop %s after failure", name)
-
-                    view_sqlstate = pg_sqlstate(exc)
-
-                    if not view_sqlstate or view_sqlstate[:2] not in ("22", "23"):
-                        log.warning("View %s failed for a reason unrelated to the data "
-                                    "[sqlstate=%s] %s", name, view_sqlstate, ctx)
-                        continue
+                    view_sqlstate = _validation_data_sqlstate(exc, view, log, ctx)
                     whole_err = (view_sqlstate, _describe(view_sqlstate, exc), _detail(exc))
+
+                def probe(where):
+                    return _probe_error(cursor, definition, where, view, log, ctx)
 
                 found = False
                 if view_sqlstate not in CONTEXT_SQLSTATES:
                     for analysis_id, lines in lines_by_analysis.items():
-                        err = _probe_error(cursor, definition, f"analysis_id = {analysis_id}", view_sqlstate)
+                        err = probe(f"analysis_id = {analysis_id}")
                         if err is None:
                             continue
                         found = True
+                        located = []
                         if (err[0] in ROW_LEVEL_SQLSTATES) or (err[0] and err[0].startswith("22")):
-                            located = _locate(cursor, definition, analysis_id, lines, err, view_sqlstate)
-                            if located:
-                                for ln, line_err in located:
-                                    add(ln, line_err, view)
-                            else:
-                                for ln in lines:
-                                    lines_to_drop.add(ln)
-                                add(min(lines), err, view)
+                            located = _locate(probe, analysis_id, lines, err)
+                        if located:
+                            for ln, line_err in located:
+                                add(ln, line_err, view)
                         else:
+                            code, description, detail = err
+                            context = f"{description}: {detail}" if detail else description
+                            group_error = (code, "Rejected as part of an analysis group that failed validation", context)
                             for ln in lines:
-                                lines_to_drop.add(ln)
-                            add(min(lines), err, view)
+                                add(ln, group_error, view)
 
-                if not found:
-                    culprits = _locate_context(cursor, definition, lines_by_analysis, counts, gone, view_sqlstate)
+                if not found and view_sqlstate in CONTEXT_SQLSTATES:
+                    culprits = _locate_context(probe, counts)
                     for ln in culprits:
                         add(ln, whole_err, view)
                     found = bool(culprits)
@@ -591,10 +653,19 @@ def _drop_staging_table(log):
 
 
 def extract_data_from_uploaded_file_tolerant(uploaded_file):
+    valid_rows = ValidatedRows()
+    try:
+        return _extract_data_from_uploaded_file_tolerant(uploaded_file, valid_rows)
+    except BaseException:
+        valid_rows.close()
+        raise
+
+
+def _extract_data_from_uploaded_file_tolerant(uploaded_file, valid_df):
     """
     Reads the CSV file in chunks and isolates rows with type errors or required nulls,
-    accumulating them in a list of warnings/errors.
-    Returns: (file_metadata, metadata_dict, valid_df, errors_list)
+    accumulating them in a list of warnings/errors. Valid rows are spooled to disk.
+    Returns: (file_metadata, metadata_dict, ValidatedRows, errors_list)
     """
     file_reader, columns = _generate_file_reader(uploaded_file)
 
@@ -624,7 +695,6 @@ def extract_data_from_uploaded_file_tolerant(uploaded_file):
 
     metadata = None
     errors = []
-    valid_chunks = []
 
     while True:
         try:
@@ -675,14 +745,15 @@ def extract_data_from_uploaded_file_tolerant(uploaded_file):
             if not chunk.empty:
                 try:
                     chunk_converted = chunk.astype(types)
-                    valid_chunks.append(chunk_converted)
+                    valid_df.append(chunk_converted)
                 except (OverflowError, ValueError):
+                    converted_rows = []
                     for idx, row in chunk.iterrows():
                         line_num = line_map[idx]
                         analysis_id_str = str(row.get("analysis_id")) if pandas.notna(row.get("analysis_id")) else "N/A"
                         try:
                             single_row_df = pandas.DataFrame([row], index=[idx]).astype(types)
-                            valid_chunks.append(single_row_df)
+                            converted_rows.append(single_row_df)
                         except (OverflowError, ValueError):
                             reasons = _row_conversion_reasons(row, types) or [
                                 "A value could not be read as the type it needs to be"
@@ -694,10 +765,8 @@ def extract_data_from_uploaded_file_tolerant(uploaded_file):
                                     "reason": reason,
                                 })
 
-    if valid_chunks:
-        valid_df = pandas.concat(valid_chunks) 
-    else:
-        valid_df = pandas.DataFrame(columns=columns)
+                    if converted_rows:
+                        valid_df.append(pandas.concat(converted_rows))
 
     if metadata is not None and not metadata.empty:
         output = _check_correct(

@@ -7,7 +7,11 @@ import uuid
 from constance import config
 from django.conf import settings
 from django.db import models
+from django.utils.functional import cached_property
+from django.utils.html import escape
 from django_celery_results.models import TaskResult
+
+from .file_handler.errors import NoValidRows
 
 
 class Country(models.Model):
@@ -152,8 +156,17 @@ class PendingUpload(models.Model):
     uploaded_file = models.FileField(upload_to=failure_data_source_directory)
     task_id = models.CharField(max_length=255, null=True)
     original_filename = models.CharField(max_length=255, null=True, blank=True)
+    row_errors = models.JSONField(default=list, blank=True)
+
+    @cached_property
+    def has_committed_results(self):
+        return UploadHistory.objects.filter(
+            data_source_id=self.data_source_id, pending_upload_id=self.pk
+        ).exists()
 
     def get_status(self):
+        if self.status == self.STATE_FAILED and self.has_committed_results:
+            return "Finalization failed"
         for status_id, name in self.STATES:
             if self.status == status_id:
                 return name
@@ -164,40 +177,60 @@ class PendingUpload(models.Model):
         if self.status != self.STATE_FAILED:
             return None
 
+        if self.has_committed_results:
+            return self._format_failure({
+                "title": "The data was saved",
+                "what_happened": "The dashboard update did not finish. Some views may still show older data.",
+                "next_steps": ("Ask an administrator to retry the dashboard update.",),
+            })
+
         try:
             task = TaskResult.objects.get(
                 task_id=self.task_id, task_name="uploader.tasks.upload_results_file"
             )
-        except TaskResult.DoesNotExist:
-            return (
-                "The information about this failure was deleted. Probably because this upload history "
-                "record is an old one. If not please contact the system administrator for more details. "
-            )
-
-        try:
             result = json.loads(task.result)
-        except (json.JSONDecodeError, TypeError):
+        except (TaskResult.DoesNotExist, json.JSONDecodeError, TypeError):
             result = {}
 
         if isinstance(result, dict) and result.get("exc_module") in (
             "uploader.file_handler.errors",
             "uploader.file_handler.checks",
         ):
-            message = result["exc_message"]
-            if len(message) > 1 and isinstance(message[1], dict):
-                e = message[1]
-                parts = [f"<strong>{e['title']}</strong><p>{e['what_happened']}</p>"]
-                if e.get("details"):
-                    parts.append("<ul>" + "".join(f"<li>{d}</li>" for d in e["details"]) + "</ul>")
-                parts.append("<p><b>What to do next:</b></p><ol>")
-                parts += [f"<li>{s}</li>" for s in e["next_steps"]]
-                parts.append(f"</ol><small>Reference: {e['incident_id']}</small>")
-                return "".join(parts)
-            return message[0].replace("\n", "<br>")  # old rows
-        return (
-            "An unexpected error occurred while processing your file. Please contact the "
-            "system administrator for more details."
-        )
+            message = result.get("exc_message", [])
+            if isinstance(message, (list, tuple)) and message:
+                if len(message) > 1 and isinstance(message[1], dict):
+                    return self._format_failure(message[1])
+                return escape(message[0]).replace("\n", "<br>")
+
+        if self.row_errors:
+            unresolved = any(error.get("line") == "N/A" for error in self.row_errors)
+            return self._format_failure({
+                "title": "The file could not be validated" if unresolved else NoValidRows.title,
+                "what_happened": NoValidRows.what_happened,
+                "next_steps": NoValidRows.next_steps,
+            })
+
+        if self.task_id is None:
+            return self._format_failure({
+                "title": "The upload was not scheduled",
+                "what_happened": "No processing task was recorded for this upload.",
+                "next_steps": ("Try uploading the file again.",),
+            })
+
+        return "No detailed failure message is available. Contact the system administrator for more details."
+
+    @staticmethod
+    def _format_failure(error):
+        parts = [f"<strong>{escape(error['title'])}</strong><p>{escape(error['what_happened'])}</p>"]
+        if error.get("details"):
+            parts.append("<ul>" + "".join(f"<li>{escape(detail)}</li>" for detail in error["details"]) + "</ul>")
+        parts.append("<p><b>What to do next:</b></p><ol>")
+        parts.extend(f"<li>{escape(step)}</li>" for step in error["next_steps"])
+        parts.append("</ol>")
+        if error.get("incident_id"):
+            parts.append(f"<small>Reference: {escape(error['incident_id'])}</small>")
+        return "".join(parts)
+
 
 class UploadHistory(models.Model):
     """
@@ -227,7 +260,7 @@ class UploadHistory(models.Model):
     errors_summary = models.JSONField(
         null=True, 
         blank=True, 
-        help_text="List in JSON with the errors/warnings collected during the upload."
+        help_text="List of errors/warnings collected during the upload."
     )
     has_warnings = models.BooleanField(
         default=False, 

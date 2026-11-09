@@ -17,6 +17,11 @@ urlpatterns = [
     path(
         "<str:data_source>/upload/<int:upload_id>/status/", views.get_upload_task_status
     ),
+    path(
+        "<str:data_source>/upload/<int:pending_upload_id>/failed-error-report/",
+        views.download_failed_upload_error_report,
+        name="download_failed_upload_error_report",
+    ),
     path("", views.create_data_source, name="create_data_source"),
     path(
         "<str:data_source>/report/<str:report_type>/",
