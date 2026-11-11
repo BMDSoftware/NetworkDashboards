@@ -12,6 +12,7 @@ import numpy
 import pandas
 from constance.test import override_config
 from django.conf import settings
+from django.contrib.messages import get_messages
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connections
 from django.test import override_settings, tag, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase
@@ -170,18 +171,22 @@ class UpdateAchillesResultsDataTestCase(TransactionTestCase):
         self.assertEqual(AchillesResultsArchive.objects.filter(data_source=first).count(), 2)
         self.assertFalse(AchillesResultsArchive.objects.filter(data_source=other).exists())
 
-    def test_processing_when_stratum1_is_zero(self):
-        csv = VALID_CSV_7 + b"101,0,5,0,,,2000\n"
-        _, _, rows, errors = extract_data_from_uploaded_file_tolerant(io.BytesIO(csv))
+    def test_processing_excludes_stratum1_zero_but_keeps_metadata(self):
+        csv = VALID_CSV_7.replace(b"0,,v1.0", b"0,0,v1.0", 1)
+        csv += b"101,0,5,0,,,2000\n101,1,5,0,,,3000\n"
+        _, metadata, rows, errors = extract_data_from_uploaded_file_tolerant(io.BytesIO(csv))
         self.addCleanup(rows.close)
         self.assertEqual(errors, [])
+        self.assertEqual(metadata["r_package_version"], "v1.0")
+        self.assertEqual([index for index, _row in rows.iterrows()], [1, 3])
 
         update_achilles_results_from_df(self._logger, self._pending_upload, rows)
 
         result = AchillesResults.objects.get(
             data_source=self._pending_upload.data_source, analysis_id=101,
         )
-        self.assertEqual(result.stratum_1, "0")
+        self.assertEqual(result.stratum_1, "1")
+        self.assertEqual(result.count_value, 3000)
 
 
 VALID_CSV_7 = (
@@ -213,6 +218,17 @@ class ExtractDataFromUploadedFileTestCase(SimpleTestCase):
                 self.assertEqual(metadata["generation_date"], "2020-01-01")
                 self.assertEqual(metadata["cdm_version"], "v5.3")
 
+    def test_numeric_metadata_ids_and_historical_dates_are_accepted(self):
+        csv = VALID_CSV_7.replace(b"0,,v1.0,2020-01-01", b"+0,,v1.0,02-FEV-20", 1)
+        csv = csv.replace(b"5000,,2020-01-01,2020-01-01", b"005000,,20201202.0,2020-01-01", 1)
+        _, metadata, rows, errors = self.parse(csv)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(metadata["generation_date"], "02-FEV-20")
+        self.assertEqual(metadata["source_release_date"], "20201202.0")
+        self.assertEqual(metadata["cdm_version"], "v5.3")
+
     def test_invalid_column_count(self):
         with self.assertRaises(InvalidFileFormat):
             self.parse(b"analysis_id,count_value\n0,1000\n")
@@ -231,7 +247,7 @@ class ExtractDataFromUploadedFileTestCase(SimpleTestCase):
 
     def test_duplicated_analysis_id_0(self):
         with self.assertRaises(DuplicatedMetadataRow):
-            self.parse(VALID_CSV_7 + b"0,,v1.0,2020-01-01,,,1000\n")
+            self.parse(VALID_CSV_7 + b"00,,v1.0,2020-01-01,,,1000\n")
 
 
 class UploadRegressionTests(TransactionTestCase):
@@ -251,7 +267,7 @@ class UploadRegressionTests(TransactionTestCase):
         csv = (
             "analysis_id,stratum_1,stratum_2,stratum_3,stratum_4,stratum_5,count_value\n"
             f"0,,3,,,,{count}\n"
-            f"101,0,5,0,,,{count}\n"
+            f"101,2,5,0,,,{count}\n"
         )
         return PendingUpload.objects.create(
             data_source=self.source,
@@ -287,7 +303,7 @@ class UploadRegressionTests(TransactionTestCase):
         ), patch(
             "uploader.tasks.validate_data_in_existing_mat_views_df", return_value=[]
         ), patch(
-            "uploader.tasks.UploadHistory.objects.create", side_effect=RuntimeError("history write failed")
+            "uploader.tasks.UploadHistory.save", side_effect=RuntimeError("history write failed")
         ), patch("uploader.tasks.refresh") as refresh_views, patch.object(
             upload_results_file, "update_state"
         ):
@@ -299,6 +315,8 @@ class UploadRegressionTests(TransactionTestCase):
         upload.refresh_from_db()
         self.assertEqual(previous.count_value, 2000)
         self.assertEqual(upload.status, PendingUpload.STATE_FAILED)
+        self.assertTrue(upload.uploaded_file.storage.exists(upload.uploaded_file.name))
+        self.assertFalse(list(Path(settings.MEDIA_ROOT).glob("**/success/*.csv")))
         self.assertEqual(
             list(AchillesResults.objects.filter(data_source=self.source).values_list("pk", flat=True)),
             [previous.pk],
@@ -312,6 +330,8 @@ class UploadRegressionTests(TransactionTestCase):
     def test_archive_uses_first_history_when_second_upload_runs_during_finalization(self):
         first = self.make_upload("a.csv", 2101)
         second = self.make_upload("b.csv", 2202)
+        storage = first.uploaded_file.storage
+        pending_paths = (first.uploaded_file.name, second.uploaded_file.name)
         source_locked = False
         refresh_started = []
 
@@ -345,6 +365,13 @@ class UploadRegressionTests(TransactionTestCase):
 
         history = UploadHistory.objects.get(pending_upload_id=first.pk)
         self.assertEqual(history.errors_summary["original_filename"], "a.csv")
+        for upload_id, pending_path in zip((first.pk, second.pk), pending_paths):
+            accepted = UploadHistory.objects.get(pending_upload_id=upload_id)
+            self.assertEqual(Path(accepted.uploaded_file.name).parent.name, "success")
+            self.assertTrue(storage.exists(accepted.uploaded_file.name))
+            with accepted.uploaded_file.open("rb") as copied:
+                self.assertEqual(hashlib.sha256(copied.read()).hexdigest(), accepted.errors_summary["file_hash"])
+            self.assertFalse(storage.exists(pending_path))
         self.assertEqual(len(refresh_started), 2)
         self.assertEqual(
             list(AchillesResults.objects.filter(
@@ -454,8 +481,9 @@ class UploadRegressionTests(TransactionTestCase):
         })
         views = {
             "division_regression_tmp": [
-                "SELECT source_line, 1 / count_value AS ratio "
-                "FROM achilles_results_tmp WHERE analysis_id = 101"
+                "WITH selected AS (SELECT source_line, count_value "
+                "FROM achilles_results_tmp WHERE analysis_id = 101) "
+                "SELECT source_line, 1 / count_value AS ratio FROM selected"
             ]
         }
         with patch("uploader.file_handler.checks.caches", {"workers_locks": Mock()}), patch(
@@ -479,7 +507,7 @@ class UploadRegressionTests(TransactionTestCase):
         csv = (
             "analysis_id,stratum_1,stratum_2,stratum_3,stratum_4,stratum_5,count_value\n"
             "0,,3,,,,100\n"
-            "101,0,5,0,,,0\n"
+            "101,2,5,0,,,0\n"
             "101,1,5,0,,,1\n"
         )
         upload.uploaded_file.save("unresolved.csv", SimpleUploadedFile("unresolved.csv", csv.encode()))
@@ -561,7 +589,7 @@ class UploadRegressionTests(TransactionTestCase):
         csv = (
             "analysis_id,stratum_1,stratum_2,stratum_3,stratum_4,stratum_5,count_value\n"
             "0,,3,,,,100\n"
-            "101,0,5,0,,,0\n"
+            "101,2,5,0,,,0\n"
             "101,1,5,0,,,1\n"
         )
 
@@ -750,3 +778,28 @@ class UploaderViewsTestCase(TransactionTestCase):
                 report_type=DataReport.ReportType.ONBOARDING,
             ).exists()
         )
+
+    def test_failed_report_save_leaves_the_csv_scheduled(self):
+        with patch("uploader.views.upload_results_file.apply_async") as enqueue, patch(
+            "uploader.views.DataReport.objects.create", side_effect=OSError("report storage unavailable")
+        ) as save_report:
+            response = self.client.post(
+                f"/uploader/{self.data_source.hash}/?ajax=true",
+                {
+                    "results_file": SimpleUploadedFile("dummy.csv", VALID_CSV_7),
+                    "onboarding": SimpleUploadedFile("onboarding.csv", b"col1,col2"),
+                },
+                HTTP_HOST=self.host,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        pending = PendingUpload.objects.get(pk=response.json()["upload_id"])
+        self.assertTrue(pending.task_id)
+        enqueue.assert_called_once_with(args=[pending.pk], task_id=pending.task_id)
+        save_report.assert_called_once()
+        self.assertFalse(DataReport.objects.filter(data_source=self.data_source).exists())
+        self.assertTrue(any(
+            "Could not save the Onboarding Report" in str(message)
+            for message in get_messages(response.wsgi_request)
+        ))

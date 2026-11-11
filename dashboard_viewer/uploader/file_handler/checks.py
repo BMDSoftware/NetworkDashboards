@@ -17,7 +17,6 @@ from materialized_queries_manager.models import MaterializedQuery
 from redis_rw_lock import RWLock
 from uploader.models import AchillesResults, DataSource, UploadHistory
 from uploader.file_handler.postgres_errors import pg_diagnostics, pg_sqlstate, SQLSTATES
-from django.core.exceptions import ValidationError
 
 from .errors import (
     DuplicatedMetadataRow,
@@ -227,16 +226,8 @@ def _model_field(model, name):
     except Exception:  # noqa
         return None
 
-VALIDATE_METADATA_DATES = True
-
-def _validate_metadata(value, field_name, model, model_field_name, is_date=False):
-    """
-    Validates a metadata field before saving it to the DataSource/UploadHistory.
-
-    - Length: if the field has a max_length, reject values that are too long.
-    - Date: optional quality rule. If enabled, reject dates that cannot be
-      interpreted.
-    """
+def _validate_metadata(value, field_name, model, model_field_name):
+    """Check the length of metadata stored as text."""
     if value is None or pandas.isna(value):
         return None
 
@@ -252,18 +243,6 @@ def _validate_metadata(value, field_name, model, model_field_name, is_date=False
             f"The metadata field '{field_name}' is too long: it has {len(text)} "
             f"characters and the maximum is {limit}."
         )
-
-    if is_date and VALIDATE_METADATA_DATES:
-        try:
-            if field is not None and field.get_internal_type() in ("DateField", "DateTimeField"):
-                field.to_python(text)
-            else:
-                pandas.to_datetime(text)
-        except (ValueError, OverflowError, TypeError, ValidationError):
-            raise InvalidFieldValue(
-                f"The metadata field '{field_name}' contains a date that could not be "
-                f"interpreted: {value!r}."
-            ) from None
 
     return text
 
@@ -473,7 +452,8 @@ def _run_probe(cursor, definition, where):
     base = _normalize(definition).rstrip().rstrip(";")
     cursor.execute(
         f"WITH achilles_results_tmp AS "
-        f"(SELECT * FROM achilles_results_tmp WHERE {where}) {base}"
+        f"(SELECT * FROM achilles_results_tmp WHERE {where}) "
+        f"SELECT * FROM ({base}) AS view_probe"
     )
     cursor.fetchall()
 
@@ -661,6 +641,14 @@ def extract_data_from_uploaded_file_tolerant(uploaded_file):
         raise
 
 
+def _metadata_analysis_id(value):
+    try:
+        analysis_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return str(analysis_id) if analysis_id in (0, 5000) else None
+
+
 def _extract_data_from_uploaded_file_tolerant(uploaded_file, valid_df):
     """
     Reads the CSV file in chunks and isolates rows with type errors or required nulls,
@@ -715,12 +703,15 @@ def _extract_data_from_uploaded_file_tolerant(uploaded_file, valid_df):
         if not chunk.empty:
             line_map = {idx: int(idx) + 2 for idx in chunk.index}
 
-            metadata_rows = chunk[chunk.analysis_id.astype(str).isin(("0", "5000"))]
+            metadata_ids = chunk["analysis_id"].map(_metadata_analysis_id).dropna()
+            metadata_rows = chunk.loc[metadata_ids.index].assign(analysis_id=metadata_ids)
             if metadata is None:
                 metadata = metadata_rows.copy()
             else:
                 metadata = pandas.concat((metadata, metadata_rows), ignore_index=True, copy=False)
 
+            # Keep metadata from the original CSV, but exclude zero strata from staging and storage.
+            chunk = chunk[~chunk["stratum_1"].isin(["0"])]
             null_mask = chunk[["analysis_id", "count_value"]].isna().any(axis=1)
             if null_mask.any():
                 invalid_rows = chunk[null_mask]
@@ -797,21 +788,18 @@ def _extract_data_from_uploaded_file_tolerant(uploaded_file, valid_df):
             "generation_date",
             UploadHistory,
             "generation_date",
-            is_date=True,
         ),
         "source_release_date": _validate_metadata(
             _get_upload_attr(analysis_5000, "stratum_2"),
             "source_release_date",
             DataSource,
             "release_date",
-            is_date=True,
         ),
         "cdm_release_date": _validate_metadata(
             _get_upload_attr(analysis_5000, "stratum_3"),
             "cdm_release_date",
             UploadHistory,
             "cdm_release_date",
-            is_date=True,
         ),
         "cdm_version": _validate_metadata(
             _get_upload_attr(analysis_5000, "stratum_4"),

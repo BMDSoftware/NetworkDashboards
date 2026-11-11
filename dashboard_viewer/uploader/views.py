@@ -196,21 +196,6 @@ def upload_achilles_results(request, *args, **kwargs):
                     original_filename=results_file.name
                 )
 
-            report_keys = [
-                'onboarding', 
-                'analyticalbenchmarks', 
-                'perinetstudy'
-            ]
-            for key in report_keys:
-                report_file = request.FILES.get(key)
-                metadata = REPORT_METADATA.get(key)
-                if report_file is not None and metadata is not None:
-                    DataReport.objects.create(
-                        data_source=obj_data_source, 
-                        uploaded_file=report_file,
-                        report_type=metadata['code']
-                    )
-
             if pending_upload is not None:
                 task_id = str(uuid4())
                 pending = PendingUpload.objects.filter(pk=pending_upload.pk)
@@ -229,10 +214,25 @@ def upload_achilles_results(request, *args, **kwargs):
                     else:
                         messages.warning(request, "Could not confirm scheduling. Check the upload status in the history.")
                 else:
-                    messages.success(request, "File uploaded with success. The file is being processed...")
+                    messages.success(request, "CSV upload scheduled for processing.")
 
-                if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.GET.get('ajax') == 'true':
-                    return JsonResponse({'success': scheduled, 'upload_id': pending_upload.pk})
+            for key, metadata in REPORT_METADATA.items():
+                report_file = request.FILES.get(key)
+                if report_file is None:
+                    continue
+                try:
+                    DataReport.objects.create(
+                        data_source=obj_data_source,
+                        uploaded_file=report_file,
+                        report_type=metadata["code"],
+                    )
+                except Exception:
+                    logger.exception("Could not save %s for data source %s", key, obj_data_source.pk)
+                    messages.error(request, f"Could not save the {metadata['title']}. Please upload that report again.")
+
+            is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.GET.get("ajax") == "true"
+            if pending_upload is not None and is_ajax:
+                return JsonResponse({"success": scheduled, "upload_id": pending_upload.pk})
 
             return redirect(request.path)
 

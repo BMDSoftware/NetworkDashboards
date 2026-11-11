@@ -38,6 +38,10 @@ def _finish_persisted_upload(task, pending_upload):
         failed_views = refresh(logger, pending_upload.data_source_id)
         if failed_views:
             raise RuntimeError(f"Materialized views failed to refresh: {', '.join(failed_views)}")
+        original = pending_upload.uploaded_file
+        # Older history rows can still refer to the pending file.
+        if original and not UploadHistory.objects.filter(uploaded_file=original.name).exists():
+            original.delete(save=False)
         pending_upload.delete()
     except Exception:
         PendingUpload.objects.filter(pk=pending_upload.pk).update(
@@ -74,6 +78,7 @@ def upload_results_file(self, pending_upload_id: int):
     logger.info("Started to process file [datasource %d, pending upload %d]", data_source.id, pending_upload_id)
 
     valid_df = None
+    archived_file = None
     failure_row_errors = []
     try:
         _update_upload_progress(self, 20, "Parsing CSV & Metadata...")
@@ -175,8 +180,6 @@ def upload_results_file(self, pending_upload_id: int):
                     pending_upload_id,
                 )
                 
-                pending_upload.uploaded_file.seek(0)
-
                 original_filename = pending_upload.original_filename or (
                     os.path.basename(pending_upload.uploaded_file.name) if pending_upload.uploaded_file else "achilles_results.csv"
                 )
@@ -184,14 +187,13 @@ def upload_results_file(self, pending_upload_id: int):
                 file_hash = _calculate_sha256(pending_upload.uploaded_file.path) if os.path.exists(pending_upload.uploaded_file.path) else None
 
                 # The archive, new results and history use the same Achilles transaction.
-                UploadHistory.objects.create(
+                history = UploadHistory(
                     data_source=data_source,
                     r_package_version=data["r_package_version"],
                     generation_date=data["generation_date"],
                     cdm_release_date=data["cdm_release_date"],
                     cdm_version=data["cdm_version"],
                     vocabulary_version=data["vocabulary_version"],
-                    uploaded_file=pending_upload.uploaded_file,
                     pending_upload_id=pending_upload.id,
                     errors_summary={
                         "original_filename": original_filename,
@@ -200,6 +202,11 @@ def upload_results_file(self, pending_upload_id: int):
                     },
                     has_warnings=has_warnings,
                 )
+                with pending_upload.uploaded_file.open("rb") as original:
+                    history.uploaded_file.save(os.path.basename(original_filename), original, save=False)
+                archived_file = history.uploaded_file
+                history.save(force_insert=True)
+
 
                 logger.debug(
                     "PERFORMANCE: File '%s' (%d rows) processed in %.2f seconds [Datasource ID: %d]",
@@ -224,6 +231,14 @@ def upload_results_file(self, pending_upload_id: int):
                 except Exception:
                     logger.info("Could not close connection %s", alias, exc_info=True)
                     pass
+
+        if archived_file:
+            try:
+                # A Redis error can arrive after commit. Keep copies referenced by history.
+                if not UploadHistory.objects.filter(uploaded_file=archived_file.name).exists():
+                    archived_file.delete(save=False)
+            except Exception:
+                logger.warning("Could not clean up the upload copy [upload %d]", pending_upload_id, exc_info=True)
 
         PendingUpload.objects.filter(id=pending_upload_id).update(
             status=PendingUpload.STATE_FAILED, row_errors=failure_row_errors
