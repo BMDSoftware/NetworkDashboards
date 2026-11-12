@@ -502,6 +502,32 @@ def _fails_without(probe, removed):
     return probe(where) is not None
 
 
+def _locate_with_metadata(probe, lines_by_analysis, view_sqlstate):
+    """Locate a data error in a view that joins analyses with metadata rows."""
+    metadata_ids = (0, 5000)
+    metadata_filter = "analysis_id IN (0, 5000)"
+    if not any(analysis_id in lines_by_analysis for analysis_id in metadata_ids):
+        return []
+    if probe(metadata_filter) is not None:
+        return []
+
+    def probe_with_metadata(where):
+        return probe(f"({where}) OR ({metadata_filter})")
+
+    located = []
+    for analysis_id, lines in lines_by_analysis.items():
+        if analysis_id in metadata_ids:
+            continue
+        error = probe_with_metadata(f"analysis_id = {analysis_id}")
+        if error and error[0] == view_sqlstate:
+            located.extend(_locate(probe_with_metadata, analysis_id, lines, error))
+
+    rejected = {line for line, _ in located}
+    if rejected and not _fails_without(probe, rejected):
+        return located
+    return []
+
+
 def _locate_context(probe, counts, max_probes=40):
     """Find a set of zero rows whose removal fixes the division, without editing staging."""
     zeros = sorted(line for line, count in counts.items() if count == 0)
@@ -610,6 +636,12 @@ def _probe_charts(mat_views, valid_df, log, ctx):
                             group_error = (code, "Rejected as part of an analysis group that failed validation", context)
                             for ln in lines:
                                 add(ln, group_error, view)
+
+                if not found and view_sqlstate in ROW_LEVEL_SQLSTATES:
+                    located = _locate_with_metadata(probe, lines_by_analysis, view_sqlstate)
+                    for ln, line_err in located:
+                        add(ln, line_err, view)
+                    found = bool(located)
 
                 if not found and view_sqlstate in CONTEXT_SQLSTATES:
                     culprits = _locate_context(probe, counts)
