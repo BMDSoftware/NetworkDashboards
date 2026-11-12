@@ -86,9 +86,9 @@ class InvalidFileFormat(UploadError):
 class InvalidFieldValue(UploadError):
     title = "Some values in the file aren't in the expected format"
     what_happened = (
-        "One or more cells contain a value that doesn't match the type expected "
-        "for that column. Only the stratum_* columns accept free text; every "
-        "other column must contain a number."
+    "One or more cells contain a value that doesn't match the format expected "
+    "for that field. Most non-stratum columns must contain numbers, and some "
+    "metadata fields must contain valid dates."
     )
     next_steps = (
         "Check the file wasn't opened and re-saved by a spreadsheet application, "
@@ -140,6 +140,14 @@ BLAME_TO_ERROR = {
     TRANSIENT: TemporaryFailure,
 }
 
+class NoValidRows(UploadError):
+    title = "No valid rows were found in the file"
+    what_happened = "No rows were imported. Existing results were kept."
+    next_steps = (
+        "Open the Log to see which rows were rejected and why.",
+        "Correct the errors in the source data and upload a new export.",
+    )
+
 def translate(exc, stage, log, **context):
     """
     Map a raw exception to a user-facing one, logging the full detail first.
@@ -151,7 +159,7 @@ def translate(exc, stage, log, **context):
     error = (
         BLAME_TO_ERROR[blame](f"While {stage}, {reason}.")
         if blame
-        else InvalidCSVFile()  # no SQLSTATE and not a dead connection -> parsing error
+        else InvalidCSVFile()  
     )
     log.exception(
         "%s failed [sqlstate=%s blame=%s incident=%s] %s %s",

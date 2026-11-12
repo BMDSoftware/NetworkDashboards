@@ -1,7 +1,12 @@
 import itertools
-
+import os
+import json
+import logging
+from uuid import uuid4
+from urllib.parse import quote
 import constance
 import pandas as pd
+
 from django.contrib import messages
 from django.db import router, transaction
 from django.forms import fields
@@ -9,17 +14,21 @@ from django.http import Http404
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import format_html, mark_safe
-from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.clickjacking import xframe_options_exempt, xframe_options_sameorigin
+
 from materialized_queries_manager.models import MaterializedQuery
 from materialized_queries_manager.tasks import refresh_materialized_views_task
 from rest_framework import viewsets
 from rest_framework.response import Response
-
+from celery.result import AsyncResult
 from . import serializers
 from .decorators import uploader_decorator
 from .forms import AchillesResultsForm, EditSourceForm, SourceForm, ReportsForm
 from .models import Country, DataSource, PendingUpload, UploadHistory, DataReport
 from .tasks import upload_results_file
+from .file_handler.checks import sort_errors_by_line
+
+logger = logging.getLogger(__name__)
 
 PAGE_TITLE = "Dashboard Data Upload"
 
@@ -41,6 +50,128 @@ REPORT_METADATA = {
     },
 }
 
+def _normalize_errors_summary(raw_errors, fallback_file_name):
+    if not raw_errors:
+        return fallback_file_name, []
+
+    if isinstance(raw_errors, str):
+        try:
+            raw_errors = json.loads(raw_errors)
+        except json.JSONDecodeError:
+            return fallback_file_name, [{
+                "line": "N/A",
+                "analysis_id": "N/A",
+                "reason": str(raw_errors),
+            }]
+
+    file_name = fallback_file_name
+    errors = []
+
+    if isinstance(raw_errors, dict):
+        file_name = raw_errors.get("original_filename") or fallback_file_name
+
+        if isinstance(raw_errors.get("errors"), list):
+            errors = raw_errors["errors"]
+        elif all(k in raw_errors for k in ("line", "analysis_id", "reason")):
+            errors = [raw_errors]
+        else:
+            errors = [{
+                "line": "N/A",
+                "analysis_id": "N/A",
+                "reason": json.dumps(raw_errors, ensure_ascii=False),
+            }]
+
+    elif isinstance(raw_errors, list):
+        errors = raw_errors
+
+    else:
+        errors = [{
+            "line": "N/A",
+            "analysis_id": "N/A",
+            "reason": str(raw_errors),
+        }]
+
+    formatted_errors = []
+    for err in errors:
+        if isinstance(err, dict):
+            raw_reason = str(err.get("reason", ""))
+            clean_reason = raw_reason.replace("$", "")
+            
+            formatted_errors.append({
+                "line": err.get("line", "N/A"),
+                "analysis_id": err.get("analysis_id", "N/A"),
+                "reason": clean_reason,
+            })
+        else:
+            raw_reason = str(err)
+            clean_reason = raw_reason.replace("$", "")
+            
+            formatted_errors.append({
+                "line": "N/A",
+                "analysis_id": "N/A",
+                "reason": clean_reason,
+            })
+
+    return file_name, sort_errors_by_line(formatted_errors)
+
+
+@uploader_decorator
+@xframe_options_sameorigin
+def download_upload_error_report(request, data_source, upload_history_id):
+    data_source_obj = get_object_or_404(DataSource, hash=data_source)
+
+    try:
+        upload_record = UploadHistory.objects.get(
+            data_source=data_source_obj,
+            id=upload_history_id,
+        )
+    except UploadHistory.DoesNotExist:
+        upload_record = get_object_or_404(
+            UploadHistory,
+            data_source=data_source_obj,
+            pending_upload_id=upload_history_id,
+        )
+
+    return _render_upload_error_report(request, data_source_obj, upload_record, upload_record.errors_summary)
+
+
+@uploader_decorator
+@xframe_options_sameorigin
+def download_failed_upload_error_report(request, data_source, pending_upload_id):
+    data_source_obj = get_object_or_404(DataSource, hash=data_source)
+    upload_record = get_object_or_404(
+        PendingUpload, pk=pending_upload_id, data_source=data_source_obj,
+        status=PendingUpload.STATE_FAILED,
+    )
+    if not upload_record.row_errors:
+        raise Http404
+
+    summary = {"original_filename": upload_record.original_filename, "errors": upload_record.row_errors}
+    return _render_upload_error_report(request, data_source_obj, upload_record, summary)
+
+
+def _render_upload_error_report(request, data_source_obj, upload_record, summary):
+    fallback_file_name = f"{data_source_obj.acronym}_achilles_results.csv"
+    file_name, formatted_errors = _normalize_errors_summary(summary, fallback_file_name)
+
+    timestamp = upload_record.upload_date.strftime("%Y%m%d_%H%M")
+    base_file_name = os.path.splitext(file_name)[0]
+    download_filename = f"Error_Log_{timestamp}_{base_file_name}.pdf"
+
+    context = {
+        "data_source": data_source_obj,
+        "upload_record": upload_record,
+        "file_name": file_name,
+        "errors": formatted_errors,
+        "page_title": download_filename,
+        "embedded": request.GET.get("embedded") == "1",
+        "failed_upload": isinstance(upload_record, PendingUpload),
+    }
+
+    response = render(request, "upload_error_report_pdf.html", context)
+    response["Content-Disposition"] = f"inline; filename*=UTF-8''{quote(download_filename, safe='')}"
+    return response
+
 @uploader_decorator
 @xframe_options_exempt
 def upload_achilles_results(request, *args, **kwargs):
@@ -55,45 +186,68 @@ def upload_achilles_results(request, *args, **kwargs):
         report_forms = ReportsForm(request.POST, request.FILES)
 
         if form.is_valid():
-            if (request.FILES.get('results_file', None) != None):
+            pending_upload = None
+            if request.FILES.get('results_file', None) is not None:
+                results_file = request.FILES["results_file"]
+                
                 pending_upload = PendingUpload.objects.create(
-                    data_source=obj_data_source, uploaded_file=request.FILES["results_file"]
+                    data_source=obj_data_source, 
+                    uploaded_file=results_file,
+                    original_filename=results_file.name
                 )
 
-                messages.success(
-                    request,
-                    "File uploaded with success. The file is being processed and its status, on the upload history table "
-                    "should update in the meantime.",
-                )
-
-                task = upload_results_file.delay(pending_upload.id)
-
-                pending_upload.task_id = task.task_id
-                pending_upload.save()
-
-            report_keys = [
-                'onboarding', 
-                'analyticalbenchmarks', 
-                'perinetstudy'
-            ]
-            for key in report_keys:
-                report_file = request.FILES.get(key)
-                metadata = REPORT_METADATA.get(key)
-                if report_file is not None and metadata is not None:
-                    DataReport.objects.create(
-                        data_source=obj_data_source, 
-                        uploaded_file=report_file,
-                        report_type=metadata['code']
+            if pending_upload is not None:
+                task_id = str(uuid4())
+                pending = PendingUpload.objects.filter(pk=pending_upload.pk)
+                pending.update(task_id=task_id)
+                scheduled = True
+                try:
+                    upload_results_file.apply_async(args=[pending_upload.pk], task_id=task_id)
+                except Exception:
+                    logger.exception("Could not confirm publication of upload %s", pending_upload.pk)
+                    scheduled = False
+                    cancelled = pending.filter(status=PendingUpload.STATE_PENDING, task_id=task_id).update(
+                        status=PendingUpload.STATE_FAILED, task_id=None
                     )
+                    if cancelled:
+                        messages.error(request, "The CSV upload could not be scheduled. Please try again.")
+                    else:
+                        messages.warning(request, "Could not confirm scheduling. Check the upload status in the history.")
+                else:
+                    messages.success(request, "CSV upload scheduled for processing.")
+
+            for key, metadata in REPORT_METADATA.items():
+                report_file = request.FILES.get(key)
+                if report_file is None:
+                    continue
+                try:
+                    DataReport.objects.create(
+                        data_source=obj_data_source,
+                        uploaded_file=report_file,
+                        report_type=metadata["code"],
+                    )
+                except Exception:
+                    logger.exception("Could not save %s for data source %s", key, obj_data_source.pk)
+                    messages.error(request, f"Could not save the {metadata['title']}. Please upload that report again.")
+
+            is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.GET.get("ajax") == "true"
+            if pending_upload is not None and is_ajax:
+                return JsonResponse({"success": scheduled, "upload_id": pending_upload.pk})
+
+            return redirect(request.path)
 
     else:
         form = AchillesResultsForm()
         report_forms = ReportsForm()
 
+    pending_uploads = PendingUpload.objects.filter(data_source=obj_data_source)
+
     upload_history = sorted(
         itertools.chain(
-            UploadHistory.objects.filter(data_source=obj_data_source),
-            PendingUpload.objects.filter(data_source=obj_data_source),
+            UploadHistory.objects.filter(data_source=obj_data_source).exclude(
+                pending_upload_id__in=pending_uploads.values("pk")
+            ),
+            pending_uploads,
             DataReport.objects.filter(data_source=obj_data_source)
         ),
         key=lambda upload: upload.upload_date,
@@ -118,21 +272,28 @@ def upload_achilles_results(request, *args, **kwargs):
 
 
 def get_upload_task_status(_request, data_source, upload_id):
-    data_source = get_object_or_404(DataSource, hash=data_source)
+    data_source_obj = get_object_or_404(DataSource, hash=data_source)
 
     try:
         pending_upload = PendingUpload.objects.get(
-            id=upload_id, data_source=data_source
+            id=upload_id, data_source=data_source_obj
         )
     except PendingUpload.DoesNotExist:
         # assume if the objects doesn't exist it finished
         upload = get_object_or_404(
-            UploadHistory, data_source=data_source, pending_upload_id=upload_id
+            UploadHistory, data_source=data_source_obj, pending_upload_id=upload_id
         )
+
+        status_text = upload.get_status()
+        has_warnings = upload.has_warnings or status_text == "Done with Warnings"
 
         return JsonResponse(
             {
-                "status": "Done",
+                "status": status_text,  
+                "completed": True,              
+                "has_warnings": has_warnings,
+                "percent": 100,
+                "step_message": "Completed with Warnings!" if has_warnings else "Completed successfully!",
                 "data": {
                     "r_package_version": upload.r_package_version,
                     "generation_date": upload.generation_date,
@@ -142,12 +303,40 @@ def get_upload_task_status(_request, data_source, upload_id):
             }
         )
 
-    if pending_upload.status != PendingUpload.STATE_FAILED:
-        return JsonResponse({"status": pending_upload.get_status()})
+    if pending_upload.status == PendingUpload.STATE_FAILED:
+        saved = pending_upload.has_committed_results
+        return JsonResponse(
+            {
+                "status": pending_upload.get_status(),
+                "completed": True,
+                "failure_msg": pending_upload.failure_message(),
+                "percent": 85 if saved else 0,
+                "step_message": "Data saved; dashboard update incomplete." if saved else "Upload failed!",
+            }
+        )
 
-    return JsonResponse(
-        {"status": "Failed", "failure_msg": pending_upload.failure_message()}
-    )
+    percent = 20
+    step_message = "Processing file..."
+    if pending_upload.task_id:
+        try:
+            task_result = AsyncResult(pending_upload.task_id)
+            progress = task_result.info if task_result.state == "PROGRESS" else None
+        except Exception as exc:
+            logger.warning("Could not read progress for upload %s: %s", pending_upload.pk, exc)
+            if pending_upload.has_committed_results:
+                percent = 85
+                step_message = "Refreshing Dashboard Materialized Views..."
+        else:
+            if isinstance(progress, dict):
+                percent = progress.get("percent", percent)
+                step_message = progress.get("step", step_message)
+
+    return JsonResponse({
+        "status": pending_upload.get_status(),
+        "completed": False,
+        "percent": percent,
+        "step_message": step_message,
+    })
 
 
 def _get_fields_initial_values(request, initial):
@@ -206,7 +395,7 @@ def create_data_source(request, *_, **kwargs):
         if data_source is not None:
             initial["hash"] = data_source
 
-        if request.GET:  # if the request has arguments
+        if request.GET: # if the request has arguments
             # compute fields' initial values
             _get_fields_initial_values(request, initial)
 
@@ -219,7 +408,7 @@ def create_data_source(request, *_, **kwargs):
                 obj.save()
 
                 return redirect(f"/uploader/{obj.hash}")
-
+                
             # since the form isn't valid, lets maintain only the valid fields
             _leave_valid_fields_values_only(request, initial, aux_form)
 
@@ -354,6 +543,7 @@ def show_csv_report(request, data_source, report_type):
 class DataSourceUpdate(viewsets.GenericViewSet):
     # since the edit and upload views don't have authentication, also disable
     #  authentication from this
+    
     authentication_classes = ()
     permission_classes = ()
 
@@ -363,6 +553,7 @@ class DataSourceUpdate(viewsets.GenericViewSet):
 
     def get_object_for_patch(self):
         # here we get the query set with select_for_update so it lock updates on that record
+        
         queryset = self.filter_queryset(self.get_queryset().select_for_update())
 
         assert (
@@ -391,6 +582,7 @@ class DataSourceUpdate(viewsets.GenericViewSet):
         if getattr(instance, "_prefetched_objects_cache", None):
             # If 'prefetch_related' has been applied to a queryset, we need to
             # forcibly invalidate the prefetch cache on the instance.
+            
             instance._prefetched_objects_cache = {}  # noqa
 
         return Response(serializer.data)

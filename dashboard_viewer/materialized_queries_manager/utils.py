@@ -7,6 +7,7 @@ from materialized_queries_manager.models import MaterializedQuery
 
 def refresh(logger, db_id=None, query_set=None):
     cache = caches["workers_locks"]
+    failed_views = []
 
     # Only one worker can update the materialized views at the same time -> same as -> only one thread
     #  can write to a file at the same time
@@ -41,9 +42,12 @@ def refresh(logger, db_id=None, query_set=None):
                     cursor.execute(
                         f"REFRESH MATERIALIZED VIEW {materialized_query.matviewname}"
                     )
-                except:  # noqa
+                except Exception:
+                    failed_views.append(materialized_query.matviewname)
                     logger.exception(
                         "Some unexpected error happen while refreshing materialized query %s. [%s]",
                         materialized_query.matviewname,
                         "command" if not db_id else f"datasource {db_id}",
                     )
+
+    return failed_views
